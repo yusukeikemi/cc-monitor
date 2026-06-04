@@ -1,0 +1,141 @@
+{
+  "name": "claude-code-usage",
+  "displayName": "Claude Code Usage",
+  "description": "Monitor Claude Code usage and costs in VSCode status bar",
+  "version": "2.0.0",
+  "publisher": "GrowthJack",
+  "author": "GrowthJack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jack21/ClaudeCodeUsage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jack21/ClaudeCodeUsage/issues"
+  },
+  "homepage": "https://github.com/jack21/ClaudeCodeUsage",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "usage",
+    "cost",
+    "monitoring",
+    "ai",
+    "anthropic",
+    "token",
+    "status-bar"
+  ],
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "icon": "icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Claude Code Usage",
+      "properties": {
+        "claudeCodeUsage.refreshInterval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 30,
+          "description": "Refresh interval in seconds (minimum 30 seconds)"
+        },
+        "claudeCodeUsage.dataDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Custom Claude data directory path (leave empty for auto-detection)"
+        },
+        "claudeCodeUsage.language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh-TW",
+            "zh-CN",
+            "ja",
+            "ko"
+          ],
+          "default": "auto",
+          "description": "Display language (auto-detection or manual selection)"
+        },
+        "claudeCodeUsage.decimalPlaces": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 4,
+          "description": "Number of decimal places for cost display"
+        },
+        "claudeCodeUsage.compactNumbers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show large token counts compactly (e.g. 1.2M, 345K) instead of full numbers."
+        },
+        "claudeCodeUsage.timezone": {
+          "type": "string",
+          "default": "",
+          "description": "IANA timezone for date display (e.g. \"Asia/Hong_Kong\", \"UTC\"). Leave empty to use the system timezone. Useful inside sandboxes/devcontainers. Day-boundary calculations still follow the system timezone."
+        },
+        "claudeCodeUsage.usageLimitTracking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show real 5-hour and weekly limit utilisation in the status bar. Uses Claude Code's existing sign-in (~/.claude/.credentials.json) — no configuration needed."
+        },
+        "claudeCodeUsage.enableContentAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the content/token analysis on conversation logs and show the Content tab. Disable to skip the CPU-heavy text scan during refresh."
+        },
+        "claudeCodeUsage.projectGroupingMode": {
+          "type": "string",
+          "enum": [
+            "git",
+            "folder",
+            "flat"
+          ],
+          "default": "git",
+          "description": "How the Projects tab groups working directories. 'git' groups by enclosing git repository (default); 'folder' groups by the heuristic top-level project folder only (no filesystem walk); 'flat' shows every working directory as its own row."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "claudeCodeUsage.refresh",
+        "title": "Refresh Usage Data",
+        "category": "Claude Code Usage"
+      },
+      {
+        "command": "claudeCodeUsage.showDetails",
+        "title": "Show Usage Details",
+        "category": "Claude Code Usage"
+      },
+      {
+        "command": "claudeCodeUsage.openSettings",
+        "title": "Open Settings",
+        "category": "Claude Code Usage"
+      },
+      {
+        "command": "claudeCodeUsage.showLogs",
+        "title": "Show Diagnostic Logs",
+        "category": "Claude Code Usage"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/glob": "^9.0.0",
+    "@types/node": "24.0.15",
+    "@types/vscode": "^1.74.0",
+    "typescript": "^5.8.3"
+  }
+}
