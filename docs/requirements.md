@@ -210,6 +210,13 @@ cc-monitor/
 
 ## 5. MVP スコープと進め方
 
+> **実装方針の更新（PR #1 時点）**: 当初はゼロから自作（`core`/`cli`/`vscode` のモノレポ）を
+> 想定していたが、調査の結果 OSS `jack21/ClaudeCodeUsage`（MIT・ランタイム依存ゼロ）が
+> 本要件の安全モデル（公式 Anthropic のみ通信）をほぼ満たしていたため、**監査のうえ
+> `packages/vscode/` へ vendoring し、第三者通信2機能を除去**する方針に変更した
+> （→ `docs/security-audit-jack21.md`）。ローカル動作確認も完了。
+> `core` の共通ライブラリ化と `cli` フロントは**次フェーズの任意課題**として残す。
+
 決定済み（本要件定義時点）:
 
 - 配信形態: 共通コア + VS Code 拡張 + CLI
