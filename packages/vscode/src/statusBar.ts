@@ -2,9 +2,12 @@ import * as vscode from 'vscode';
 import { ClaudeApiUsageResponse, ClaudeUsageLimit, SessionData, UsageData } from './types';
 import { I18n } from './i18n';
 
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
 export class StatusBarManager {
   private statusBarItem: vscode.StatusBarItem;
   private quotaItem: vscode.StatusBarItem;
+  private cacheItem: vscode.StatusBarItem;
   private isLoading: boolean = false;
 
   constructor() {
@@ -15,6 +18,10 @@ export class StatusBarManager {
     // A second, quieter item for the real usage-limit indicator.
     this.quotaItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
     this.quotaItem.command = 'claudeCodeUsage.showDetails';
+
+    // Third item: prompt-cache warmth countdown.
+    this.cacheItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
+    this.cacheItem.command = 'claudeCodeUsage.showDetails';
 
     this.updateStatusBar();
   }
@@ -107,6 +114,49 @@ export class StatusBarManager {
 
     this.quotaItem.tooltip = this.createQuotaTooltip(usageLimits as ClaudeApiUsageResponse);
     this.quotaItem.show();
+  }
+
+  /**
+   * Update the prompt-cache warmth indicator.
+   * Shows a countdown (e.g. "$(zap) 3:24") from the last API request.
+   * Hidden when the cache has already expired or no data is available.
+   * Public so the extension can tick it every 30 s without a full refresh.
+   */
+  updateCacheWarmth(lastRequestTime: Date | null): void {
+    if (!lastRequestTime) {
+      this.cacheItem.hide();
+      return;
+    }
+    const remainingMs = CACHE_TTL_MS - (Date.now() - lastRequestTime.getTime());
+    if (remainingMs <= 0) {
+      this.cacheItem.hide();
+      return;
+    }
+    const totalSec = Math.ceil(remainingMs / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    const countdown = `${min}:${String(sec).padStart(2, '0')}`;
+    this.cacheItem.text = `$(zap) ${countdown}`;
+    this.cacheItem.tooltip = this.createCacheTooltip(lastRequestTime, remainingMs);
+    if (remainingMs < 60_000) {
+      this.cacheItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    } else {
+      this.cacheItem.backgroundColor = undefined;
+    }
+    this.cacheItem.show();
+  }
+
+  private createCacheTooltip(lastRequest: Date, remainingMs: number): vscode.MarkdownString {
+    const md = new vscode.MarkdownString();
+    md.supportThemeIcons = true;
+    const min = Math.floor(remainingMs / 60_000);
+    const sec = Math.ceil((remainingMs % 60_000) / 1000);
+    const countdown = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+    md.appendMarkdown(`**$(zap) Prompt Cache**\n\n`);
+    md.appendMarkdown(`Cache warm — expires in **${countdown}**\n\n`);
+    md.appendMarkdown(`Last request: ${lastRequest.toLocaleTimeString()}\n\n`);
+    md.appendMarkdown(`*Each API call resets the 5-minute TTL.*`);
+    return md;
   }
 
   private showNoData(): void {
@@ -246,5 +296,6 @@ export class StatusBarManager {
   dispose(): void {
     this.statusBarItem.dispose();
     this.quotaItem.dispose();
+    this.cacheItem.dispose();
   }
 }
