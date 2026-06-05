@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ClaudeDataLoader } from './dataLoader';
@@ -6,6 +7,7 @@ import { StatusBarManager } from './statusBar';
 import { UsageWebviewProvider } from './webview';
 import { I18n } from './i18n';
 import { ClaudeApiClient } from './claudeApiClient';
+import { QuotaHistory, QuotaSnapshot } from './quotaHistory';
 import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ExtensionConfig } from './types';
 
 export class ClaudeCodeUsageExtension {
@@ -64,6 +66,18 @@ export class ClaudeCodeUsageExtension {
       }),
       vscode.commands.registerCommand('claudeCodeUsage.showLogs', () => {
         this.outputChannel.show();
+      }),
+      vscode.commands.registerCommand('claudeCodeUsage.exportQuotaHistory', () => {
+        this.exportQuotaHistory();
+      }),
+      vscode.commands.registerCommand('claudeCodeUsage.openQuotaHistoryFile', async () => {
+        const file = QuotaHistory.getHistoryFilePath();
+        if (!fs.existsSync(file)) {
+          vscode.window.showInformationMessage('No quota history recorded yet. It accrues while the extension runs.');
+          return;
+        }
+        const doc = await vscode.workspace.openTextDocument(file);
+        await vscode.window.showTextDocument(doc);
       })
     ];
 
@@ -95,6 +109,7 @@ export class ClaudeCodeUsageExtension {
       compactNumbers: config.get('compactNumbers', false),
       timezone: config.get('timezone', ''),
       usageLimitTracking: config.get('usageLimitTracking', true),
+      recordQuotaHistory: config.get('recordQuotaHistory', true),
       enableContentAnalysis: config.get('enableContentAnalysis', true),
       projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat'
     };
@@ -202,6 +217,11 @@ export class ClaudeCodeUsageExtension {
     if (fetched) {
       this.cache.usageLimits = fetched;
       this.cache.usageLimitsLastUpdate = new Date();
+      if (config.recordQuotaHistory) {
+        void QuotaHistory.appendSnapshot(fetched).catch((e) => {
+          this.outputChannel.appendLine(`quota-history: append failed: ${(e as Error).message}`);
+        });
+      }
       return fetched;
     }
     // Keep showing the last known value if a refresh fails.
@@ -273,9 +293,11 @@ export class ClaudeCodeUsageExtension {
       const projectBreakdown = ClaudeDataLoader.getProjectBreakdown(records, undefined, config.projectGroupingMode);
       const branchBreakdown = ClaudeDataLoader.getBranchBreakdown(records);
 
+      const quotaHistory = await QuotaHistory.readHistory({ sinceDays: 30 });
+
       // Update UI
       this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits);
-      this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis);
+      this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -284,6 +306,48 @@ export class ClaudeCodeUsageExtension {
       this.statusBar.updateUsageData(null, null, errorMessage);
       this.webviewProvider.updateData(null, null, null, null, [], [], [], errorMessage, null);
     }
+  }
+
+  /** Export the full quota history to a user-chosen CSV or JSON file. */
+  private async exportQuotaHistory(): Promise<void> {
+    const history = await QuotaHistory.readHistory();
+    if (history.length === 0) {
+      vscode.window.showInformationMessage('No quota history recorded yet. It accrues while the extension runs.');
+      return;
+    }
+
+    const target = await vscode.window.showSaveDialog({
+      saveLabel: 'Export Quota History',
+      filters: { CSV: ['csv'], JSON: ['json'] },
+      defaultUri: vscode.Uri.file(path.join(os.homedir(), 'quota-history.csv'))
+    });
+    if (!target) {
+      return;
+    }
+
+    const asCsv = target.fsPath.toLowerCase().endsWith('.csv');
+    let content: string;
+    if (asCsv) {
+      const header = 'ts,five_hour,five_hour_resets_at,seven_day,seven_day_resets_at,seven_day_opus,seven_day_opus_resets_at';
+      const cell = (v: string | number | null): string => {
+        if (v === null) {
+          return '';
+        }
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      const rows = history.map((s: QuotaSnapshot) =>
+        [s.ts, s.fiveHour, s.fiveHourResetsAt, s.sevenDay, s.sevenDayResetsAt, s.sevenDayOpus, s.sevenDayOpusResetsAt]
+          .map(cell)
+          .join(',')
+      );
+      content = [header, ...rows].join('\n') + '\n';
+    } else {
+      content = JSON.stringify(history, null, 2);
+    }
+
+    await fs.promises.writeFile(target.fsPath, content, 'utf-8');
+    vscode.window.showInformationMessage(`Exported ${history.length} quota snapshots to ${target.fsPath}`);
   }
 
   dispose(): void {

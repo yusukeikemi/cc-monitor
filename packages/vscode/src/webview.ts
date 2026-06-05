@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { I18n } from './i18n';
 import { getModelRatesPerMillion } from './pricing';
+import { QuotaSnapshot } from './quotaHistory';
 import { ActivityAnalysis, BranchUsage, ContentAnalysis, ProjectGroup, ProjectUsage, SessionData, SessionUsage, UsageData } from './types';
 
 export class UsageWebviewProvider {
@@ -23,6 +24,7 @@ export class UsageWebviewProvider {
   private contentAnalysis: ContentAnalysis | null = null;
   private branchBreakdown: BranchUsage[] = [];
   private activityAnalysis: ActivityAnalysis | null = null;
+  private quotaHistory: QuotaSnapshot[] = [];
   // True once the dashboard shell (document + script) is live in the panel, so
   // subsequent refreshes can swap just the inner content instead of reloading
   // the whole document (which flashed the panel blank on every refresh).
@@ -114,7 +116,8 @@ export class UsageWebviewProvider {
     projectBreakdown: ProjectGroup[] = [],
     contentAnalysis: ContentAnalysis | null = null,
     branchBreakdown: BranchUsage[] = [],
-    activityAnalysis: ActivityAnalysis | null = null
+    activityAnalysis: ActivityAnalysis | null = null,
+    quotaHistory: QuotaSnapshot[] = []
   ): void {
     this.currentSessionData = sessionData;
     this.todayData = todayData;
@@ -134,6 +137,7 @@ export class UsageWebviewProvider {
     this.contentAnalysis = contentAnalysis;
     this.branchBreakdown = branchBreakdown;
     this.activityAnalysis = activityAnalysis;
+    this.quotaHistory = quotaHistory;
 
     if (this.panel) {
       this.updateWebview();
@@ -320,6 +324,7 @@ export class UsageWebviewProvider {
     const contentActive = this.currentTab === 'content' ? 'active' : '';
     const branchesActive = this.currentTab === 'branches' ? 'active' : '';
     const activityActive = this.currentTab === 'activity' ? 'active' : '';
+    const quotaActive = this.currentTab === 'quota' ? 'active' : '';
 
     // The Content tab is hidden when content analysis is disabled via
     // claudeCodeUsage.enableContentAnalysis (the analyser returned null).
@@ -397,6 +402,11 @@ export class UsageWebviewProvider {
             ` +
       activityTabButton +
       `
+            <button id="tab-quota" class="tab ` +
+      quotaActive +
+      `" onclick="showTab('quota')">` +
+      I18n.t.popup.quotaHistory +
+      `</button>
           </div>
 
           <div id="today" class="tab-content ` +
@@ -454,6 +464,14 @@ export class UsageWebviewProvider {
           ` +
       activityTabContent +
       `
+
+          <div id="quota" class="tab-content ` +
+      quotaActive +
+      `">
+            ` +
+      this.renderQuotaData() +
+      `
+          </div>
     `
     );
   }
@@ -1513,6 +1531,153 @@ export class UsageWebviewProvider {
       splitSection +
       heatmapSection +
       topicsSection
+    );
+  }
+
+  /**
+   * "Quota" tab: the real 5-hour / weekly utilisation recorded over time
+   * (from api.anthropic.com/api/oauth/usage). Shows a time-series line chart,
+   * an hour-of-day breakdown of when the 5-hour quota is consumed, and the
+   * latest reset info. History only accrues while the extension runs.
+   */
+  private renderQuotaData(): string {
+    const t = I18n.t.popup;
+    const history = [...this.quotaHistory].sort(
+      (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+    );
+    if (history.length === 0) {
+      return '<div class="no-data"><p>' + t.quotaHistoryEmpty + '</p></div>';
+    }
+
+    const latest = history[history.length - 1];
+    const fmtTime = (iso: string | null): string => {
+      if (!iso) {
+        return '—';
+      }
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) {
+        return '—';
+      }
+      return d.toLocaleString(
+        I18n.getLocale(),
+        I18n.dateFormatOptions({ month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      );
+    };
+    const pctStr = (v: number | null): string => (v == null ? '—' : v.toFixed(0) + '%');
+
+    // --- latest values table ---
+    const row = (label: string, util: number | null, resets: string | null): string =>
+      '<tr><td class="date-cell">' + label + '</td>' +
+      '<td class="number-cell">' + pctStr(util) + '</td>' +
+      '<td class="number-cell">' + fmtTime(resets) + '</td></tr>';
+    let latestRows = row(t.quota5h, latest.fiveHour, latest.fiveHourResetsAt) +
+      row(t.quotaWeekly, latest.sevenDay, latest.sevenDayResetsAt);
+    if (latest.sevenDayOpus != null) {
+      latestRows += row(t.quotaOpus, latest.sevenDayOpus, latest.sevenDayOpusResetsAt);
+    }
+    const latestTable =
+      '<div class="daily-breakdown"><h3>' + t.quota + '</h3>' +
+      '<div class="daily-table-container"><table class="daily-table"><thead><tr>' +
+      '<th>' + t.quotaWindow + '</th><th>' + t.quotaUtilization + '</th><th>' + t.resets + '</th>' +
+      '</tr></thead><tbody>' + latestRows + '</tbody></table></div></div>';
+
+    // --- time-series line chart (server-rendered SVG, 0-100%) ---
+    const W = 640, H = 200, padL = 36, padR = 12, padT = 12, padB = 28;
+    const t0 = new Date(history[0].ts).getTime();
+    const t1 = new Date(latest.ts).getTime();
+    const span = Math.max(t1 - t0, 1);
+    const xOf = (ts: string): number => padL + ((new Date(ts).getTime() - t0) / span) * (W - padL - padR);
+    const yOf = (v: number): number => padT + (1 - v / 100) * (H - padT - padB);
+
+    const series = (pick: (s: QuotaSnapshot) => number | null, color: string): string => {
+      const pts = history.filter((s) => pick(s) != null);
+      if (pts.length === 0) {
+        return '';
+      }
+      const coords = pts.map((s) => xOf(s.ts).toFixed(1) + ',' + yOf(pick(s) as number).toFixed(1));
+      const line =
+        '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + coords.join(' ') + '" />';
+      const dots = pts
+        .map((s) => '<circle cx="' + xOf(s.ts).toFixed(1) + '" cy="' + yOf(pick(s) as number).toFixed(1) + '" r="2" fill="' + color + '" />')
+        .join('');
+      return line + dots;
+    };
+
+    let gridlines = '';
+    [0, 25, 50, 75, 100].forEach((g) => {
+      const y = yOf(g).toFixed(1);
+      gridlines +=
+        '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y +
+        '" stroke="var(--vscode-panel-border)" stroke-width="1" opacity="0.5" />' +
+        '<text x="' + (padL - 6) + '" y="' + (yOf(g) + 3).toFixed(1) +
+        '" text-anchor="end" font-size="10" fill="var(--vscode-descriptionForeground)">' + g + '</text>';
+    });
+    let xlabels = '';
+    [history[0], history[Math.floor(history.length / 2)], latest].forEach((s, i) => {
+      const anchor = i === 0 ? 'start' : i === 2 ? 'end' : 'middle';
+      xlabels +=
+        '<text x="' + xOf(s.ts).toFixed(1) + '" y="' + (H - 8) +
+        '" text-anchor="' + anchor + '" font-size="10" fill="var(--vscode-descriptionForeground)">' +
+        this.escapeHtml(fmtTime(s.ts)) + '</text>';
+    });
+    const blue = 'var(--vscode-charts-blue)';
+    const orange = 'var(--vscode-charts-orange)';
+    const chart =
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet" role="img">' +
+      gridlines +
+      series((s) => s.fiveHour, blue) +
+      series((s) => s.sevenDay, orange) +
+      xlabels +
+      '</svg>';
+    const legend =
+      '<div class="cost-comp-legend">' +
+      '<span class="legend-item"><span class="legend-dot" style="background:' + blue + ';"></span>' + t.quota5h + '</span>' +
+      '<span class="legend-item"><span class="legend-dot" style="background:' + orange + ';"></span>' + t.quotaWeekly + '</span>' +
+      '</div>';
+    const chartSection =
+      '<div class="daily-breakdown"><h3>' + t.quotaOverTime + '</h3>' + chart + legend + '</div>';
+
+    // --- hour-of-day consumption: sum positive jumps in 5-hour utilisation,
+    // bucketed by the local hour of the later sample (negatives = a quota reset).
+    const hourFmt = new Intl.DateTimeFormat('en-US', I18n.dateFormatOptions({ hour: '2-digit', hour12: false }));
+    const buckets = new Array(24).fill(0);
+    for (let i = 1; i < history.length; i++) {
+      const prev = history[i - 1].fiveHour;
+      const cur = history[i].fiveHour;
+      if (prev == null || cur == null) {
+        continue;
+      }
+      const delta = cur - prev;
+      if (delta <= 0) {
+        continue;
+      }
+      const h = parseInt(hourFmt.format(new Date(history[i].ts)), 10) % 24;
+      buckets[h] += delta;
+    }
+    const hourMax = Math.max(...buckets, 1);
+    let hourHeader = '<div class="hm-row"><div class="hm-label"></div>';
+    for (let h = 0; h < 24; h++) {
+      hourHeader += '<div class="hm-hhead">' + (h % 6 === 0 ? h : '') + '</div>';
+    }
+    hourHeader += '</div>';
+    let hourCells = '<div class="hm-row"><div class="hm-label">' + t.quota5h + '</div>';
+    for (let h = 0; h < 24; h++) {
+      const v = buckets[h];
+      const op = v > 0 ? 0.15 + 0.85 * (v / hourMax) : 0;
+      const bg = v > 0 ? 'background: var(--vscode-charts-blue); opacity: ' + op.toFixed(2) + ';' : '';
+      hourCells += '<div class="hm-cell" style="' + bg + '" title="' + h + ':00 — +' + v.toFixed(0) + '%"></div>';
+    }
+    hourCells += '</div>';
+    const hourSection =
+      '<div class="daily-breakdown"><h3>' + t.quotaByHour + '</h3>' +
+      '<p class="table-hint">' + t.quotaByHourHint + '</p>' +
+      '<div class="heatmap">' + hourHeader + hourCells + '</div></div>';
+
+    return (
+      '<p class="table-hint">' + t.quotaHint + ' · ' + t.quotaHistoryNote + '</p>' +
+      latestTable +
+      chartSection +
+      hourSection
     );
   }
 

@@ -111,6 +111,15 @@ export interface Translations {
     heatmapHint: string;
     recentTopics: string;
     activityNote: string;
+    // Quota tab
+    quotaHistory: string;
+    quotaHistoryEmpty: string;
+    quotaHistoryNote: string;
+    quotaUtilization: string;
+    quotaOpus: string;
+    quotaOverTime: string;
+    quotaByHour: string;
+    quotaByHourHint: string;
   };
   settings: {
     title: string;
@@ -232,6 +241,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       heatmapHint: 'Assistant turns by weekday and hour',
       recentTopics: 'Recent Session Topics',
       activityNote: 'Exact counts from the last 30 days.',
+      quotaHistory: 'Quota History',
+      quotaHistoryEmpty: 'No quota history recorded yet. It accrues while the extension is running — the API only reports the current value, so the past cannot be back-filled.',
+      quotaHistoryNote: 'Recorded while the extension runs; granularity is a few minutes.',
+      quotaUtilization: 'Utilization',
+      quotaOpus: 'Weekly (Opus)',
+      quotaOverTime: 'Utilization Over Time',
+      quotaByHour: '5-hour Quota Consumed by Hour',
+      quotaByHourHint: 'Sum of 5-hour utilization increases, bucketed by hour of day.',
     },
     settings: {
       title: 'Claude Code Usage Settings',
@@ -353,6 +370,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       heatmapHint: "Assistent-Turns nach Wochentag und Stunde",
       recentTopics: "Letzte Sitzungsthemen",
       activityNote: "Exakte Zahlen der letzten 30 Tage.",
+      quotaHistory: "Kontingent-Verlauf",
+      quotaHistoryEmpty: "Noch kein Kontingent-Verlauf aufgezeichnet. Er wird gesammelt, während die Erweiterung läuft — die API liefert nur den aktuellen Wert, die Vergangenheit kann nicht nachgetragen werden.",
+      quotaHistoryNote: "Wird während des Betriebs aufgezeichnet; Auflösung wenige Minuten.",
+      quotaUtilization: "Auslastung",
+      quotaOpus: "Woche (Opus)",
+      quotaOverTime: "Auslastung im Zeitverlauf",
+      quotaByHour: "5-Stunden-Kontingent nach Stunde",
+      quotaByHourHint: "Summe der Anstiege der 5-Stunden-Auslastung, nach Tagesstunde gruppiert.",
     },
     settings: {
       title: "Claude Code Nutzungseinstellungen",
@@ -472,6 +497,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       heatmapHint: '依星期與時段的助手回合數',
       recentTopics: '近期會話主題',
       activityNote: '近 30 天的精確統計。',
+      quotaHistory: '額度歷史',
+      quotaHistoryEmpty: '尚未記錄額度歷史。資料會在擴充功能執行期間累積 —— API 僅回報目前數值,無法回補過去。',
+      quotaHistoryNote: '於擴充功能執行期間記錄,粒度約數分鐘。',
+      quotaUtilization: '使用率',
+      quotaOpus: '每週 (Opus)',
+      quotaOverTime: '使用率隨時間變化',
+      quotaByHour: '依時段的 5 小時額度消耗',
+      quotaByHourHint: '5 小時使用率增量的總和,依當日時段分組。',
     },
     settings: {
       title: 'Claude Code 使用量設定',
@@ -591,6 +624,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       heatmapHint: '按星期与时段的助手回合数',
       recentTopics: '近期会话主题',
       activityNote: '近 30 天的精确统计。',
+      quotaHistory: '额度历史',
+      quotaHistoryEmpty: '尚未记录额度历史。数据会在扩展运行期间累积 —— API 仅返回当前数值,无法回补过去。',
+      quotaHistoryNote: '于扩展运行期间记录,粒度约数分钟。',
+      quotaUtilization: '使用率',
+      quotaOpus: '每周 (Opus)',
+      quotaOverTime: '使用率随时间变化',
+      quotaByHour: '按时段的 5 小时额度消耗',
+      quotaByHourHint: '5 小时使用率增量的总和,按当日时段分组。',
     },
     settings: {
       title: 'Claude Code 使用量设置',
@@ -710,6 +751,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       heatmapHint: '曜日×時間帯ごとのアシスタント ターン数',
       recentTopics: '最近のセッション トピック',
       activityNote: '過去 30 日間の正確なカウントです。',
+      quotaHistory: '使用枠の履歴',
+      quotaHistoryEmpty: 'まだ使用枠の履歴がありません。拡張機能の動作中に蓄積されます — API は現在値のみを返すため、過去にさかのぼって記録することはできません。',
+      quotaHistoryNote: '拡張機能の動作中に記録されます。粒度は数分間隔です。',
+      quotaUtilization: '使用率',
+      quotaOpus: '週間 (Opus)',
+      quotaOverTime: '使用率の推移',
+      quotaByHour: '時間帯別の5時間枠の消費',
+      quotaByHourHint: '5時間枠の使用率の増加分を、時刻（時）ごとに合計したものです。',
     },
     settings: {
       title: 'Claude Code 使用量設定',
@@ -829,6 +878,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       heatmapHint: '요일·시간대별 어시스턴트 턴 수',
       recentTopics: '최근 세션 주제',
       activityNote: '최근 30일간의 정확한 집계입니다.',
+      quotaHistory: '사용 한도 기록',
+      quotaHistoryEmpty: '아직 기록된 사용 한도 내역이 없습니다. 확장이 실행되는 동안 누적됩니다 — API는 현재 값만 반환하므로 과거는 소급할 수 없습니다.',
+      quotaHistoryNote: '확장 실행 중에 기록되며, 단위는 수 분입니다.',
+      quotaUtilization: '사용률',
+      quotaOpus: '주간 (Opus)',
+      quotaOverTime: '시간에 따른 사용률',
+      quotaByHour: '시간대별 5시간 한도 소비',
+      quotaByHourHint: '5시간 사용률 증가분을 시간대별로 합산한 값입니다.',
     },
     settings: {
       title: 'Claude Code 사용량 설정',

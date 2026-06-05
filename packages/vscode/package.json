@@ -87,6 +87,11 @@
           "default": true,
           "description": "Show real 5-hour and weekly limit utilisation in the status bar. Uses Claude Code's existing sign-in (~/.claude/.credentials.json) — no configuration needed."
         },
+        "claudeCodeUsage.recordQuotaHistory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record a timestamped history of real 5-hour/weekly quota utilisation to ~/.claude/cc-monitor/quota-history.jsonl for the Quota tab and export. History only accrues while the extension is running and cannot be back-filled. Requires usageLimitTracking."
+        },
         "claudeCodeUsage.enableContentAnalysis": {
           "type": "boolean",
           "default": true,
@@ -123,6 +128,16 @@
       {
         "command": "claudeCodeUsage.showLogs",
         "title": "Show Diagnostic Logs",
+        "category": "Claude Code Usage"
+      },
+      {
+        "command": "claudeCodeUsage.exportQuotaHistory",
+        "title": "Export Quota History",
+        "category": "Claude Code Usage"
+      },
+      {
+        "command": "claudeCodeUsage.openQuotaHistoryFile",
+        "title": "Open Quota History File",
         "category": "Claude Code Usage"
       }
     ]

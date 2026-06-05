@@ -24,9 +24,17 @@ interface HttpResponse {
   body: string;
 }
 
+// macOS Claude Code stores OAuth credentials in the login Keychain instead of
+// ~/.claude/.credentials.json. This is the generic-password item it uses.
+const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+
 export class ClaudeApiClient {
   private readonly credentialsPath: string;
   private credentials: ClaudeCredentials | null = null;
+  // Where the loaded credentials came from. We only persist refreshed tokens
+  // back to the file; for 'keychain' we keep them in memory so we don't clobber
+  // the item Claude Code itself manages.
+  private credentialsSource: 'file' | 'keychain' | null = null;
   private rateLimitedUntil: number = 0;
   private out: vscode.OutputChannel | null;
   // Once curl has succeeded after fetch failed, remember so we don't keep
@@ -47,27 +55,81 @@ export class ClaudeApiClient {
 
   private async loadCredentials(): Promise<ClaudeCredentials | null> {
     try {
-      if (!fs.existsSync(this.credentialsPath)) {
-        this.log(`credentials: missing at ${this.credentialsPath}`);
-        return null;
-      }
-      const content = await fs.promises.readFile(this.credentialsPath, 'utf-8');
-      const parsed = JSON.parse(content) as ClaudeCredentials;
-      if (!parsed || !parsed.claudeAiOauth || !parsed.claudeAiOauth.accessToken) {
+      if (fs.existsSync(this.credentialsPath)) {
+        const content = await fs.promises.readFile(this.credentialsPath, 'utf-8');
+        const parsed = JSON.parse(content) as ClaudeCredentials;
+        if (parsed && parsed.claudeAiOauth && parsed.claudeAiOauth.accessToken) {
+          this.credentials = parsed;
+          this.credentialsSource = 'file';
+          return parsed;
+        }
         this.log('credentials: file present but no claudeAiOauth.accessToken');
-        return null;
+      } else {
+        this.log(`credentials: file missing at ${this.credentialsPath}`);
       }
-      this.credentials = parsed;
-      return parsed;
     } catch (e) {
-      this.log(`credentials: read failed: ${(e as Error).message}`);
-      return null;
+      this.log(`credentials: file read failed: ${(e as Error).message}`);
     }
+
+    // macOS keeps the credentials in the login Keychain, not the file.
+    if (process.platform === 'darwin') {
+      const fromKeychain = await this.readCredentialsFromKeychain();
+      if (fromKeychain) {
+        this.credentials = fromKeychain;
+        this.credentialsSource = 'keychain';
+        this.log('credentials: loaded from macOS Keychain');
+        return fromKeychain;
+      }
+    }
+
+    return null;
+  }
+
+  /** Read the OAuth credentials JSON from the macOS login Keychain. Returns
+   * null when the item is absent, access is denied, or the value is unusable. */
+  private readCredentialsFromKeychain(): Promise<ClaudeCredentials | null> {
+    return new Promise((resolve) => {
+      const account = os.userInfo().username;
+      const args = ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account, '-w'];
+      const child = spawn('security', args, { shell: false });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (c: Buffer) => (stdout += c.toString('utf-8')));
+      child.stderr.on('data', (c: Buffer) => (stderr += c.toString('utf-8')));
+      child.on('error', (e) => {
+        this.log(`keychain: spawn error ${(e as Error).message}`);
+        resolve(null);
+      });
+      child.on('close', (code) => {
+        if (code !== 0) {
+          this.log(`keychain: security exit ${code}: ${stderr.trim().slice(0, 120)}`);
+          resolve(null);
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout.trim()) as ClaudeCredentials;
+          if (!parsed || !parsed.claudeAiOauth || !parsed.claudeAiOauth.accessToken) {
+            this.log('keychain: item found but no claudeAiOauth.accessToken');
+            resolve(null);
+            return;
+          }
+          resolve(parsed);
+        } catch (e) {
+          this.log(`keychain: parse failed: ${(e as Error).message}`);
+          resolve(null);
+        }
+      });
+    });
   }
 
   private async saveCredentials(credentials: ClaudeCredentials): Promise<void> {
-    await fs.promises.writeFile(this.credentialsPath, JSON.stringify(credentials), 'utf-8');
     this.credentials = credentials;
+    // Only persist to the file we own. When credentials came from the Keychain,
+    // keep the refreshed token in memory only — Claude Code manages that item,
+    // and writing a stale file could shadow it.
+    if (this.credentialsSource !== 'keychain') {
+      await fs.promises.writeFile(this.credentialsPath, JSON.stringify(credentials), 'utf-8');
+    }
   }
 
   private isTokenExpired(credentials: ClaudeCredentials): boolean {
