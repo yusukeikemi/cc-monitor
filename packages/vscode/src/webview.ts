@@ -1067,6 +1067,69 @@ export class UsageWebviewProvider {
     );
   }
 
+  /** Cache hit rate: share of input-side tokens served cheaply from cache (0–100), or null when no data. */
+  private cacheHitRatePct(d: UsageData): number | null {
+    const denom = d.totalInputTokens + d.totalCacheCreationTokens + d.totalCacheReadTokens;
+    return denom > 0 ? (d.totalCacheReadTokens / denom) * 100 : null;
+  }
+
+  /** A colored badge cell for cache hit rate. Green ≥50%, yellow 20–49%, red <20%. */
+  private renderCacheHitCell(d: UsageData): string {
+    const rate = this.cacheHitRatePct(d);
+    if (rate === null) {
+      return '<td class="number-cell">—</td>';
+    }
+    const pct = Math.round(rate);
+    const cls = pct >= 50 ? 'cache-badge-good' : pct >= 20 ? 'cache-badge-mid' : 'cache-badge-low';
+    return '<td class="number-cell"><span class="cache-badge ' + cls + '">' + pct + '%</span></td>';
+  }
+
+  /** Insights card: overall rate + worst-offender list for the Projects tab. */
+  private renderCacheInsights(groups: ProjectGroup[]): string {
+    const t = I18n.t.popup;
+    const totalTokens = (d: UsageData) =>
+      d.totalInputTokens + d.totalCacheCreationTokens + d.totalCacheReadTokens;
+
+    // Weighted overall rate across all projects.
+    let sumRead = 0, sumTotal = 0;
+    groups.forEach((g) => { sumRead += g.data.totalCacheReadTokens; sumTotal += totalTokens(g.data); });
+    const overallRate = sumTotal > 0 ? Math.round((sumRead / sumTotal) * 100) : null;
+
+    // Low-performers: rate < 20% with at least 50k input-side tokens (filter out tiny projects).
+    const low = groups
+      .filter((g) => totalTokens(g.data) >= 50_000)
+      .map((g) => ({ name: g.groupName, rate: this.cacheHitRatePct(g.data) }))
+      .filter((x): x is { name: string; rate: number } => x.rate !== null && x.rate < 20)
+      .sort((a, b) => a.rate - b.rate)
+      .slice(0, 4);
+
+    if (overallRate === null && low.length === 0) {
+      return '';
+    }
+
+    const overallBadge = overallRate !== null
+      ? '<span class="cache-badge ' + (overallRate >= 50 ? 'cache-badge-good' : overallRate >= 20 ? 'cache-badge-mid' : 'cache-badge-low') + '">' + overallRate + '%</span>'
+      : '';
+
+    const lowList = low.length > 0
+      ? '<p class="table-hint cache-low-list"><strong>' + t.cacheLowEfficiency + ':</strong> ' +
+        low.map((x) => '<span class="cache-badge cache-badge-low">' + this.escapeHtml(x.name) + ' ' + Math.round(x.rate) + '%</span>').join(' ') +
+        '</p>'
+      : '';
+
+    const tip = low.length > 0
+      ? '<p class="table-hint">' + t.cacheEfficiencyTip + '</p>'
+      : '';
+
+    return (
+      '<div class="daily-breakdown cache-insights-card">' +
+      '<h3>' + t.cacheHitRate + ' ' + overallBadge + '</h3>' +
+      lowList +
+      tip +
+      '</div>'
+    );
+  }
+
   private formatDuration(start: Date, end: Date): string {
     if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) {
       return '-';
@@ -1108,15 +1171,18 @@ export class UsageWebviewProvider {
       '<td class="number-cell">' + I18n.formatNumber(d.totalOutputTokens) + '</td>' +
       '<td class="number-cell">' + I18n.formatNumber(d.totalCacheCreationTokens) + '</td>' +
       '<td class="number-cell">' + I18n.formatNumber(d.totalCacheReadTokens) + '</td>' +
-      '<td class="number-cell">' + I18n.formatNumber(d.messageCount) + '</td>';
+      '<td class="number-cell">' + I18n.formatNumber(d.messageCount) + '</td>' +
+      this.renderCacheHitCell(d);
 
     let rows = '';
     this.projectBreakdown.forEach((group, idx) => {
       const groupId = 'pg' + idx;
+      const cacheRate = this.cacheHitRatePct(group.data);
       const sortAttrs =
         ' data-sort-name="' + this.escapeHtml(group.groupName.toLowerCase()) + '"' +
         ' data-sort-sessions="' + group.sessionCount + '"' +
         ' data-sort-lastactive="' + group.lastSeen.getTime() + '"' +
+        ' data-sort-cachehit="' + (cacheRate !== null ? cacheRate.toFixed(2) : '-1') + '"' +
         this.usageSortAttrs(group.data);
 
       if (group.children.length <= 1) {
@@ -1171,6 +1237,7 @@ export class UsageWebviewProvider {
       '<th class="sortable" data-sortkey="' + key + '">' + label + '</th>';
 
     return (
+      this.renderCacheInsights(this.projectBreakdown) +
       '<div class="daily-breakdown">' +
       '<h3>' + t.projectBreakdown + '</h3>' +
       '<p class="table-hint">' + t.sortHint + '</p>' +
@@ -1185,6 +1252,7 @@ export class UsageWebviewProvider {
       th('cachecreate', t.cacheCreation) +
       th('cacheread', t.cacheRead) +
       th('messages', t.messages) +
+      th('cachehit', t.cacheHitRate) +
       th('lastactive', t.lastActive) +
       '</tr></thead>' +
       '<tbody>' + rows + '</tbody>' +
@@ -2707,6 +2775,22 @@ export class UsageWebviewProvider {
         color: var(--vscode-badge-foreground);
         vertical-align: middle;
       }
+
+      .cache-badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 3px;
+        white-space: nowrap;
+      }
+      .cache-badge-good { background: rgba(40,167,69,0.18); color: var(--vscode-charts-green, #28a745); }
+      .cache-badge-mid  { background: rgba(255,165,0,0.15); color: var(--vscode-charts-yellow, #d4a017); }
+      .cache-badge-low  { background: rgba(220,53,69,0.15); color: var(--vscode-charts-red, #dc3545); }
+
+      .cache-insights-card { margin-bottom: 12px; }
+      .cache-low-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0 4px; }
+      .cache-low-list strong { margin-right: 4px; }
 
       .cbar-total {
         font-size: 12px;

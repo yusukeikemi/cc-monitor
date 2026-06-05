@@ -62,6 +62,8 @@ export interface Translations {
     share: string;
     resets: string;
     cacheHitRate: string;
+    cacheLowEfficiency: string;
+    cacheEfficiencyTip: string;
     last30days: string;
     branches: string;
     branchBreakdown: string;
@@ -193,6 +195,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       share: 'Share',
       resets: 'Resets',
       cacheHitRate: 'Cache Hit Rate',
+      cacheLowEfficiency: 'Projects with low cache efficiency (< 20%)',
+      cacheEfficiencyTip: 'Low rates often mean repeated file reads without cache warmup. Try keeping sessions in the same working directory, or add key files to CLAUDE.md.',
       last30days: 'Last 30 days',
       branches: 'Branches',
       branchBreakdown: 'Branch Usage',
@@ -320,6 +324,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       share: "Anteil",
       resets: "Reset",
       cacheHitRate: "Cache-Trefferrate",
+      cacheLowEfficiency: "Projekte mit niedriger Cache-Effizienz (< 20%)",
+      cacheEfficiencyTip: "Niedrige Raten deuten oft auf wiederholte Dateilesevorgänge ohne Cache-Aufwärmung hin. Versuche, Sitzungen im selben Arbeitsverzeichnis zu starten, oder füge wichtige Dateien zu CLAUDE.md hinzu.",
       last30days: "Letzte 30 Tage",
       branches: "Branches",
       branchBreakdown: "Nutzung nach Branch",
@@ -449,6 +455,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       share: '佔比',
       resets: '重置',
       cacheHitRate: '快取命中率',
+      cacheLowEfficiency: '快取效率偏低的專案（< 20%）',
+      cacheEfficiencyTip: '命中率偏低通常代表檔案被重複讀取而未暖機。建議在相同工作目錄下開始會話，或將常用檔案加入 CLAUDE.md。',
       last30days: '近 30 天',
       branches: '分支',
       branchBreakdown: '各分支使用量',
@@ -576,6 +584,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       share: '占比',
       resets: '重置',
       cacheHitRate: '缓存命中率',
+      cacheLowEfficiency: '缓存效率偏低的项目（< 20%）',
+      cacheEfficiencyTip: '命中率偏低通常意味着文件被反复读取而未预热。建议在相同工作目录下启动会话，或将常用文件添加到 CLAUDE.md。',
       last30days: '近 30 天',
       branches: '分支',
       branchBreakdown: '各分支使用量',
@@ -703,6 +713,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       share: '割合',
       resets: 'リセット',
       cacheHitRate: 'キャッシュヒット率',
+      cacheLowEfficiency: 'キャッシュ効率が低いプロジェクト（< 20%）',
+      cacheEfficiencyTip: 'ヒット率が低い場合、同じファイルをセッションごとに再読み込みしている可能性があります。同じ作業ディレクトリでセッションを継続するか、CLAUDE.md に主要ファイルを追記してみてください。',
       last30days: '過去 30 日',
       branches: 'ブランチ',
       branchBreakdown: 'ブランチ別使用量',
@@ -830,6 +842,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       share: '비율',
       resets: '재설정',
       cacheHitRate: '캐시 적중률',
+      cacheLowEfficiency: '캐시 효율이 낮은 프로젝트 (< 20%)',
+      cacheEfficiencyTip: '적중률이 낮으면 세션마다 동일한 파일을 반복 읽는 경우가 많습니다. 같은 작업 디렉토리에서 세션을 유지하거나 주요 파일을 CLAUDE.md에 추가해 보세요.',
       last30days: '최근 30일',
       branches: '브랜치',
       branchBreakdown: '브랜치별 사용량',
