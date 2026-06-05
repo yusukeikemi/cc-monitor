@@ -15,6 +15,7 @@ export class ClaudeCodeUsageExtension {
   private webviewProvider: UsageWebviewProvider;
   private apiClient: ClaudeApiClient;
   private refreshTimer: NodeJS.Timeout | undefined;
+  private cacheWarmthTimer: NodeJS.Timeout | undefined;
   private fileWatcher: fs.FSWatcher | undefined;
   private watchDebounceTimer: NodeJS.Timeout | undefined;
   private watchedDir: string | null = null;
@@ -26,6 +27,7 @@ export class ClaudeCodeUsageExtension {
     dataDirectory: string | null;
     usageLimits: ClaudeApiUsageResponse | null;
     usageLimitsLastUpdate: Date;
+    lastRecordTime: Date | null;
   } = {
     records: [],
     contentAnalysis: null,
@@ -33,7 +35,8 @@ export class ClaudeCodeUsageExtension {
     lastUpdate: new Date(0),
     dataDirectory: null,
     usageLimits: null,
-    usageLimitsLastUpdate: new Date(0)
+    usageLimitsLastUpdate: new Date(0),
+    lastRecordTime: null
   };
 
   private outputChannel: vscode.OutputChannel;
@@ -49,6 +52,7 @@ export class ClaudeCodeUsageExtension {
     this.setupCommands();
     this.loadConfiguration();
     this.startAutoRefresh();
+    this.startCacheWarmthTimer();
     this.refreshData().then(() => this.startFileWatching());
     console.log('Claude Code Usage Extension: Initialization complete');
   }
@@ -204,6 +208,16 @@ export class ClaudeCodeUsageExtension {
     }, intervalMs);
   }
 
+  /** Tick the cache-warmth countdown every 30 s (independent of the data refresh). */
+  private startCacheWarmthTimer(): void {
+    if (this.cacheWarmthTimer) {
+      clearInterval(this.cacheWarmthTimer);
+    }
+    this.cacheWarmthTimer = setInterval(() => {
+      this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
+    }, 30_000);
+  }
+
   /** Fetch real usage limits via OAuth, cached for 2 minutes. */
   private async maybeFetchUsageLimits(config: ExtensionConfig): Promise<ClaudeApiUsageResponse | null> {
     if (!config.usageLimitTracking) {
@@ -254,8 +268,9 @@ export class ClaudeCodeUsageExtension {
       const usageLimits = await this.maybeFetchUsageLimits(config);
 
       if (!needFullRefresh) {
-        // Idle: logs unchanged — only refresh the (independent) quota indicator.
+        // Idle: logs unchanged — only refresh the independent indicators.
         this.statusBar.updateQuota(usageLimits);
+        this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
         return;
       }
 
@@ -273,6 +288,14 @@ export class ClaudeCodeUsageExtension {
       this.cache.activityAnalysis = activityAnalysis;
       this.cache.lastUpdate = new Date();
       this.cache.dataDirectory = dataDirectory;
+
+      // Track the timestamp of the most recent API call for the cache-warmth indicator.
+      if (records.length > 0) {
+        const maxTs = Math.max(...records.map((r: any) => new Date(r.timestamp).getTime()));
+        if (!isNaN(maxTs)) {
+          this.cache.lastRecordTime = new Date(maxTs);
+        }
+      }
 
       if (records.length === 0) {
         const error = 'No usage records found. Make sure Claude Code is running.';
@@ -297,6 +320,7 @@ export class ClaudeCodeUsageExtension {
 
       // Update UI
       this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits);
+      this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
       this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory);
 
     } catch (error) {
@@ -353,6 +377,9 @@ export class ClaudeCodeUsageExtension {
   dispose(): void {
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
+    }
+    if (this.cacheWarmthTimer) {
+      clearInterval(this.cacheWarmthTimer);
     }
     this.stopFileWatching();
     this.statusBar.dispose();

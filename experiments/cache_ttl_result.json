@@ -1,0 +1,38 @@
+{
+  "conclusion": "reads_extend_ttl",
+  "model": "claude-haiku-4-5-20251001",
+  "results": [
+    {
+      "label": "A  T+0:00  (create cache)",
+      "ts": "2026-06-06T00:33:25.896913",
+      "input_tokens": 13,
+      "cache_creation": 14770,
+      "cache_read": 0,
+      "output_tokens": 4
+    },
+    {
+      "label": "B  T+0:30  (confirm hit)",
+      "ts": "2026-06-06T00:33:55.907317",
+      "input_tokens": 13,
+      "cache_creation": 0,
+      "cache_read": 14770,
+      "output_tokens": 4
+    },
+    {
+      "label": "C  T+4:30  (pre-expiry read)",
+      "ts": "2026-06-06T00:37:55.911594",
+      "input_tokens": 13,
+      "cache_creation": 0,
+      "cache_read": 14770,
+      "output_tokens": 4
+    },
+    {
+      "label": "D  T+9:00  (verdict)",
+      "ts": "2026-06-06T00:42:25.903413",
+      "input_tokens": 13,
+      "cache_creation": 0,
+      "cache_read": 14770,
+      "output_tokens": 4
+    }
+  ]
+}
