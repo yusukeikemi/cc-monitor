@@ -6,7 +6,7 @@ import { StatusBarManager } from './statusBar';
 import { UsageWebviewProvider } from './webview';
 import { I18n } from './i18n';
 import { ClaudeApiClient } from './claudeApiClient';
-import { ClaudeApiUsageResponse, ContentAnalysis, ExtensionConfig } from './types';
+import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ExtensionConfig } from './types';
 
 export class ClaudeCodeUsageExtension {
   private statusBar: StatusBarManager;
@@ -19,6 +19,7 @@ export class ClaudeCodeUsageExtension {
   private cache: {
     records: any[];
     contentAnalysis: ContentAnalysis | null;
+    activityAnalysis: ActivityAnalysis | null;
     lastUpdate: Date;
     dataDirectory: string | null;
     usageLimits: ClaudeApiUsageResponse | null;
@@ -26,6 +27,7 @@ export class ClaudeCodeUsageExtension {
   } = {
     records: [],
     contentAnalysis: null,
+    activityAnalysis: null,
     lastUpdate: new Date(0),
     dataDirectory: null,
     usageLimits: null,
@@ -245,8 +247,10 @@ export class ClaudeCodeUsageExtension {
       });
       const records = loaded.records;
       const contentAnalysis = loaded.contentAnalysis;
+      const activityAnalysis = loaded.activityAnalysis;
       this.cache.records = records;
       this.cache.contentAnalysis = contentAnalysis;
+      this.cache.activityAnalysis = activityAnalysis;
       this.cache.lastUpdate = new Date();
       this.cache.dataDirectory = dataDirectory;
 
@@ -271,7 +275,7 @@ export class ClaudeCodeUsageExtension {
 
       // Update UI
       this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits);
-      this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown);
+      this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

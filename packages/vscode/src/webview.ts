@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { I18n } from './i18n';
 import { getModelRatesPerMillion } from './pricing';
-import { BranchUsage, ContentAnalysis, ProjectGroup, ProjectUsage, SessionData, SessionUsage, UsageData } from './types';
+import { ActivityAnalysis, BranchUsage, ContentAnalysis, ProjectGroup, ProjectUsage, SessionData, SessionUsage, UsageData } from './types';
 
 export class UsageWebviewProvider {
   private panel: vscode.WebviewPanel | undefined;
@@ -22,6 +22,11 @@ export class UsageWebviewProvider {
   private projectBreakdown: ProjectGroup[] = [];
   private contentAnalysis: ContentAnalysis | null = null;
   private branchBreakdown: BranchUsage[] = [];
+  private activityAnalysis: ActivityAnalysis | null = null;
+  // True once the dashboard shell (document + script) is live in the panel, so
+  // subsequent refreshes can swap just the inner content instead of reloading
+  // the whole document (which flashed the panel blank on every refresh).
+  private shellReady: boolean = false;
 
   constructor(private context: vscode.ExtensionContext) {}
 
@@ -39,9 +44,12 @@ export class UsageWebviewProvider {
       enableScripts: true,
       retainContextWhenHidden: true,
     });
+    // A fresh panel has no shell yet — the first updateWebview() does a full render.
+    this.shellReady = false;
 
     this.panel.onDidDispose(() => {
       this.panel = undefined;
+      this.shellReady = false;
     });
 
     this.panel.webview.onDidReceiveMessage(async (message) => {
@@ -105,7 +113,8 @@ export class UsageWebviewProvider {
     sessionBreakdown: SessionUsage[] = [],
     projectBreakdown: ProjectGroup[] = [],
     contentAnalysis: ContentAnalysis | null = null,
-    branchBreakdown: BranchUsage[] = []
+    branchBreakdown: BranchUsage[] = [],
+    activityAnalysis: ActivityAnalysis | null = null
   ): void {
     this.currentSessionData = sessionData;
     this.todayData = todayData;
@@ -124,6 +133,7 @@ export class UsageWebviewProvider {
     this.projectBreakdown = projectBreakdown;
     this.contentAnalysis = contentAnalysis;
     this.branchBreakdown = branchBreakdown;
+    this.activityAnalysis = activityAnalysis;
 
     if (this.panel) {
       this.updateWebview();
@@ -132,7 +142,12 @@ export class UsageWebviewProvider {
 
   setLoading(loading: boolean): void {
     this.isLoading = loading;
-    if (this.panel) {
+    // While a refresh is in flight, keep the existing dashboard on screen rather
+    // than swapping in the spinner page — that swap is what made the panel flash
+    // blank on every refresh. The fresh data arrives via updateData() moments
+    // later and is swapped in smoothly. Only show the spinner on the very first
+    // load, before any content exists.
+    if (this.panel && (!loading || !this.shellReady)) {
       this.updateWebview();
     }
   }
@@ -140,7 +155,22 @@ export class UsageWebviewProvider {
   private updateWebview(): void {
     if (!this.panel) return;
 
+    // Incremental path: once the dashboard shell is live and we have data (not an
+    // error / no-data / loading state), swap only the inner content. Reassigning
+    // webview.html reloads the whole document and flashes the panel blank, so we
+    // avoid it on refresh.
+    const hasData = !!(this.currentSessionData || this.todayData || this.monthData);
+    if (this.shellReady && !this.isLoading && !this.error && hasData) {
+      this.panel.webview.postMessage({
+        command: 'updateContent',
+        html: this.getMainContentInner(),
+      });
+      return;
+    }
+
     this.panel.webview.html = this.getWebviewContent();
+    // The shell is reusable only when we just rendered the full dashboard.
+    this.shellReady = !this.isLoading && !this.error && hasData;
   }
 
   private getWebviewContent(): string {
@@ -233,6 +263,43 @@ export class UsageWebviewProvider {
   }
 
   private getMainContent(): string {
+    const title = I18n.t.popup.title;
+
+    return (
+      `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+        <title>` +
+      title +
+      `</title>
+        <style>` +
+      this.getStyles() +
+      `</style>
+      </head>
+      <body>
+        <div class="container">` +
+      this.getMainContentInner() +
+      `</div>
+        <script>` +
+      this.getScript() +
+      `</script>
+      </body>
+      </html>
+    `
+    );
+  }
+
+  /**
+   * The dashboard's inner markup (everything inside <div class="container">),
+   * rendered without the surrounding document shell or <script>. On refresh we
+   * post just this fragment to the live webview and swap it into the existing
+   * container — see updateWebview(). That keeps the panel from reloading the
+   * whole document, which used to flash blank on every refresh.
+   */
+  private getMainContentInner(): string {
     // Pre-resolve I18n values to avoid template literal issues
     const title = I18n.t.popup.title;
     const refresh = I18n.t.popup.refresh;
@@ -252,6 +319,7 @@ export class UsageWebviewProvider {
     const projectsActive = this.currentTab === 'projects' ? 'active' : '';
     const contentActive = this.currentTab === 'content' ? 'active' : '';
     const branchesActive = this.currentTab === 'branches' ? 'active' : '';
+    const activityActive = this.currentTab === 'activity' ? 'active' : '';
 
     // The Content tab is hidden when content analysis is disabled via
     // claudeCodeUsage.enableContentAnalysis (the analyser returned null).
@@ -264,22 +332,20 @@ export class UsageWebviewProvider {
       ? '<div id="content" class="tab-content ' + contentActive + '">' + this.renderContentData() + '</div>'
       : '';
 
+    // The Activity tab rides on the same analysis pass as Content, so it is
+    // shown/hidden under the same condition.
+    const activityEnabled = this.activityAnalysis !== null;
+    const activityTab = I18n.t.popup.activity;
+    const activityTabButton = activityEnabled
+      ? '<button id="tab-activity" class="tab ' + activityActive +
+        '" onclick="showTab(\'activity\')">' + activityTab + '</button>'
+      : '';
+    const activityTabContent = activityEnabled
+      ? '<div id="activity" class="tab-content ' + activityActive + '">' + this.renderActivityData() + '</div>'
+      : '';
+
     return (
       `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-        <title>` +
-      title +
-      `</title>
-        <style>` +
-      this.getStyles() +
-      `</style>
-      </head>
-      <body>
-        <div class="container">
           <header>
             <h1>` +
       title +
@@ -328,6 +394,9 @@ export class UsageWebviewProvider {
       `" onclick="showTab('branches')">` +
       branchesTab +
       `</button>
+            ` +
+      activityTabButton +
+      `
           </div>
 
           <div id="today" class="tab-content ` +
@@ -381,12 +450,10 @@ export class UsageWebviewProvider {
       this.renderBranchData() +
       `
           </div>
-        </div>
-        <script>` +
-      this.getScript() +
-      `</script>
-      </body>
-      </html>
+
+          ` +
+      activityTabContent +
+      `
     `
     );
   }
@@ -1245,6 +1312,207 @@ export class UsageWebviewProvider {
       '<div class="cbar-list">' + catRows + '</div>' +
       toolSection +
       '</div>'
+    );
+  }
+
+  /**
+   * "Activity" tab: exact counts (not token estimates) of how tools, skills and
+   * subagents were used over the same recent window as the content analysis,
+   * plus code-change, turn-outcome and time-of-day activity.
+   */
+  private renderActivityData(): string {
+    const t = I18n.t.popup;
+    const a = this.activityAnalysis;
+    if (!a) {
+      return '<div class="no-data"><p>' + I18n.t.popup.noDataMessage + '</p></div>';
+    }
+
+    const num = (n: number): string => I18n.formatNumber(n);
+    const pct = (n: number, d: number): string => (d > 0 ? ((n / d) * 100).toFixed(1) + '%' : '—');
+    const fmtDur = (ms: number): string => {
+      if (!ms || ms <= 0) {
+        return '—';
+      }
+      const s = ms / 1000;
+      if (s < 60) {
+        return s.toFixed(1) + 's';
+      }
+      const m = Math.floor(s / 60);
+      return m + 'm ' + Math.round(s % 60) + 's';
+    };
+
+    // --- summary cards ---
+    const card = (label: string, value: string): string =>
+      '<div class="summary-item"><div class="label">' + label + '</div><div class="value">' + value + '</div></div>';
+    const summary =
+      '<div class="usage-summary"><div class="summary-grid">' +
+      card(t.toolCalls, num(a.totalToolCalls)) +
+      card(t.errorRate, pct(a.toolErrors, a.totalToolCalls)) +
+      card(t.prompts, num(a.promptCount)) +
+      card(t.prsCreated, num(a.prCount)) +
+      card(t.filesEdited, num(a.filesEditedCount)) +
+      card(t.linesAdded, '+' + num(a.linesAdded)) +
+      card(t.linesRemoved, '-' + num(a.linesRemoved)) +
+      card(t.gitOps, num(a.gitOperations)) +
+      card(t.userModifiedRate, pct(a.userModifiedCount, a.editResultCount)) +
+      '</div></div>';
+
+    // --- horizontal bar list (reuses the .cbar-* styles from the Content tab) ---
+    const barList = (rows: { label: string; value: number; extra?: string }[], colorClass: string): string => {
+      if (rows.length === 0) {
+        return '';
+      }
+      const max = Math.max(...rows.map((r) => r.value), 1);
+      const total = rows.reduce((s, r) => s + r.value, 0);
+      let html = '';
+      rows.forEach((r) => {
+        const width = (r.value / max) * 100;
+        html +=
+          '<div class="cbar-row">' +
+          '<div class="cbar-label" title="' + this.escapeHtml(r.label) + '">' + this.escapeHtml(r.label) + '</div>' +
+          '<div class="cbar-track"><div class="cbar-fill ' + colorClass + '" style="width: ' + width.toFixed(1) + '%;"></div></div>' +
+          '<div class="cbar-val">' + num(r.value) + (r.extra ? ' ' + r.extra : '') + '</div>' +
+          '<div class="cbar-pct">' + pct(r.value, total) + '</div>' +
+          '</div>';
+      });
+      return '<div class="cbar-list">' + html + '</div>';
+    };
+
+    // --- tools table ---
+    let toolsTable = '';
+    if (a.tools.length > 0) {
+      let rows = '';
+      a.tools.forEach((tool) => {
+        const avg = tool.durationSamples > 0 ? fmtDur(tool.totalDurationMs / tool.durationSamples) : '—';
+        rows +=
+          '<tr>' +
+          '<td class="date-cell">' + this.escapeHtml(tool.name) + '</td>' +
+          '<td class="number-cell">' + num(tool.count) + '</td>' +
+          '<td class="number-cell">' + num(tool.errors) + '</td>' +
+          '<td class="number-cell">' + pct(tool.errors, tool.count) + '</td>' +
+          '<td class="number-cell">' + avg + '</td>' +
+          '</tr>';
+      });
+      toolsTable =
+        '<div class="daily-breakdown"><h3>' + t.toolUsage + '</h3>' +
+        '<div class="daily-table-container"><table class="daily-table"><thead><tr>' +
+        '<th>' + t.toolUsage + '</th><th>' + t.count + '</th><th>' + t.errors + '</th>' +
+        '<th>' + t.errorRate + '</th><th>' + t.avgDuration + '</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+    }
+
+    // --- skills ---
+    let skillsSection = '';
+    if (a.skills.length > 0) {
+      skillsSection =
+        '<div class="daily-breakdown"><h3>' + t.skillUsage + '</h3>' +
+        barList(a.skills.map((s) => ({ label: s.name, value: s.count })), 'cf-3') +
+        '</div>';
+    }
+
+    // --- subagents ---
+    let subagentTable = '';
+    if (a.subagents.length > 0) {
+      let rows = '';
+      a.subagents.forEach((s) => {
+        rows +=
+          '<tr>' +
+          '<td class="date-cell">' + this.escapeHtml(s.agentType) + '</td>' +
+          '<td class="number-cell">' + num(s.count) + '</td>' +
+          '<td class="number-cell">' + num(s.totalTokens) + '</td>' +
+          '<td class="number-cell">' + num(s.totalToolUseCount) + '</td>' +
+          '<td class="number-cell">' + fmtDur(s.count > 0 ? s.totalDurationMs / s.count : 0) + '</td>' +
+          '</tr>';
+      });
+      subagentTable =
+        '<div class="daily-breakdown"><h3>' + t.subagentUsage + '</h3>' +
+        '<div class="daily-table-container"><table class="daily-table"><thead><tr>' +
+        '<th>' + t.subagent + '</th><th>' + t.count + '</th><th>' + t.tokensCol + '</th>' +
+        '<th>' + t.toolUses + '</th><th>' + t.avgDuration + '</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+    }
+
+    // --- turn outcomes + permission modes ---
+    let turnsSection = '';
+    if (a.stopReasons.length > 0) {
+      turnsSection =
+        '<div class="daily-breakdown"><h3>' + t.turnOutcomes + '</h3>' +
+        barList(a.stopReasons.map((r) => ({ label: r.label, value: r.count })), 'cf-1') +
+        '</div>';
+    }
+    let permSection = '';
+    if (a.permissionModes.length > 0) {
+      permSection =
+        '<div class="daily-breakdown"><h3>' + t.permissionModes + '</h3>' +
+        barList(a.permissionModes.map((r) => ({ label: r.label, value: r.count })), 'cf-2') +
+        '</div>';
+    }
+
+    // --- main vs subagent output-token split ---
+    let splitSection = '';
+    const splitTotal = a.mainOutputTokens + a.sidechainOutputTokens;
+    if (splitTotal > 0) {
+      const mPct = (a.mainOutputTokens / splitTotal) * 100;
+      const sPct = (a.sidechainOutputTokens / splitTotal) * 100;
+      splitSection =
+        '<div class="daily-breakdown"><h3>' + t.tokenSplit + '</h3>' +
+        '<div class="cost-comp-bar">' +
+        '<div class="cost-comp-seg seg-input" style="width: ' + mPct.toFixed(2) + '%;"></div>' +
+        '<div class="cost-comp-seg seg-output" style="width: ' + sPct.toFixed(2) + '%;"></div>' +
+        '</div>' +
+        '<div class="cost-comp-legend">' +
+        '<span class="legend-item"><span class="legend-dot seg-input"></span>' + t.mainThread + ' ' + num(a.mainOutputTokens) + ' (' + mPct.toFixed(0) + '%)</span>' +
+        '<span class="legend-item"><span class="legend-dot seg-output"></span>' + t.subagentsLabel + ' ' + num(a.sidechainOutputTokens) + ' (' + sPct.toFixed(0) + '%)</span>' +
+        '</div></div>';
+    }
+
+    // --- activity heatmap (weekday × hour) ---
+    const heatMax = Math.max(...a.heatmap.flat(), 1);
+    let hourHeader = '<div class="hm-row"><div class="hm-label"></div>';
+    for (let h = 0; h < 24; h++) {
+      hourHeader += '<div class="hm-hhead">' + (h % 6 === 0 ? h : '') + '</div>';
+    }
+    hourHeader += '</div>';
+    let heatRows = '';
+    for (let dow = 0; dow < 7; dow++) {
+      const wd = new Date(2023, 0, 1 + dow); // 2023-01-01 was a Sunday
+      const wdLabel = wd.toLocaleDateString(I18n.getLocale(), { weekday: 'short' });
+      heatRows += '<div class="hm-row"><div class="hm-label">' + this.escapeHtml(wdLabel) + '</div>';
+      for (let h = 0; h < 24; h++) {
+        const v = a.heatmap[dow][h];
+        const op = v > 0 ? 0.15 + 0.85 * (v / heatMax) : 0;
+        const bg = v > 0 ? 'background: var(--vscode-charts-blue); opacity: ' + op.toFixed(2) + ';' : '';
+        heatRows += '<div class="hm-cell" style="' + bg + '" title="' + wdLabel + ' ' + h + ':00 — ' + num(v) + '"></div>';
+      }
+      heatRows += '</div>';
+    }
+    const heatmapSection =
+      '<div class="daily-breakdown"><h3>' + t.activityHeatmap + '</h3>' +
+      '<p class="table-hint">' + t.heatmapHint + '</p>' +
+      '<div class="heatmap">' + hourHeader + heatRows + '</div></div>';
+
+    // --- recent session topics ---
+    let topicsSection = '';
+    if (a.recentTitles.length > 0) {
+      const items = a.recentTitles
+        .map((tt) => '<li>' + this.escapeHtml(tt.title) + '</li>')
+        .join('');
+      topicsSection =
+        '<div class="daily-breakdown"><h3>' + t.recentTopics + '</h3>' +
+        '<ul class="topic-list">' + items + '</ul></div>';
+    }
+
+    return (
+      '<p class="table-hint">' + t.last30days + ' · ' + t.activityNote + '</p>' +
+      summary +
+      toolsTable +
+      skillsSection +
+      subagentTable +
+      turnsSection +
+      permSection +
+      splitSection +
+      heatmapSection +
+      topicsSection
     );
   }
 
@@ -2356,6 +2624,58 @@ export class UsageWebviewProvider {
       .cf-5 {
         background: var(--vscode-charts-red);
       }
+
+      .heatmap {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        overflow-x: auto;
+        padding-bottom: 4px;
+      }
+
+      .hm-row {
+        display: flex;
+        gap: 3px;
+        align-items: center;
+      }
+
+      .hm-label {
+        width: 38px;
+        flex-shrink: 0;
+        font-size: 10px;
+        color: var(--vscode-descriptionForeground);
+        text-align: right;
+        padding-right: 4px;
+        white-space: nowrap;
+      }
+
+      .hm-hhead {
+        width: 16px;
+        flex-shrink: 0;
+        font-size: 9px;
+        color: var(--vscode-descriptionForeground);
+        text-align: center;
+      }
+
+      .hm-cell {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+        border-radius: 2px;
+        background: var(--vscode-input-background);
+        border: 1px solid var(--vscode-input-border);
+      }
+
+      .topic-list {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        font-size: 12px;
+        color: var(--vscode-foreground);
+      }
+
+      .topic-list li {
+        margin-bottom: 4px;
+      }
     `;
   }
 
@@ -2706,6 +3026,21 @@ window.closeAllMonthlyDetails = closeAllMonthlyDetails;
 window.addEventListener('message', function(event) {
   const message = event.data;
   console.log("[DEBUG] Received message from extension:", message);
+
+  if (message.command === 'updateContent') {
+    // Smooth refresh: replace only the dashboard's inner markup, preserving the
+    // document (and scroll position) so the panel never flashes blank. Click and
+    // message handling use document/window-level delegation, so they keep working
+    // across the swap; we only need to re-bind the direct chart-tab listeners.
+    var container = document.querySelector('.container');
+    if (container && typeof message.html === 'string') {
+      container.innerHTML = message.html;
+      document.querySelectorAll('.daily-breakdown').forEach(function(c) {
+        bindChartTabEvents(c);
+      });
+    }
+    return;
+  }
 
   if (message.command === 'hourlyDataResponse') {
     const container = document.getElementById('hourly-detail-' + message.date);
