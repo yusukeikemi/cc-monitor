@@ -109,6 +109,67 @@ export interface ContentAnalysis {
   recentPrompts: { cwd: string; text: string }[];
 }
 
+// --- Activity analysis (the "Activity" tab) ---
+// All figures cover the same recent window as the content analysis (last 30
+// days) and are exact counts derived from the raw log — not token estimates.
+
+// One tool, aggregated over the window.
+export interface ToolUsageStat {
+  name: string;
+  count: number; // number of tool_use invocations
+  errors: number; // tool_result blocks flagged is_error (includes user rejections)
+  totalDurationMs: number; // sum of durationMs samples (only some tools report timing)
+  durationSamples: number; // how many invocations contributed a duration
+}
+
+// One skill (the Skill tool, broken out by the skill that was invoked).
+export interface SkillUsageStat {
+  name: string;
+  count: number;
+}
+
+// One subagent type (the Task/Agent tool, broken out by agent type), with the
+// real cost/effort the subagent itself consumed (from its toolUseResult).
+export interface SubagentUsageStat {
+  agentType: string;
+  count: number;
+  totalTokens: number;
+  totalDurationMs: number;
+  totalToolUseCount: number;
+}
+
+export interface LabeledCount {
+  label: string;
+  count: number;
+}
+
+export interface ActivityAnalysis {
+  windowDays: number;
+  totalToolCalls: number;
+  toolErrors: number;
+  tools: ToolUsageStat[]; // sorted by count desc
+  skills: SkillUsageStat[];
+  subagents: SubagentUsageStat[];
+  promptCount: number; // distinct user prompts
+  prCount: number; // pull requests created (pr-link events)
+  stopReasons: LabeledCount[]; // assistant turn outcomes (tool_use vs end_turn …)
+  permissionModes: LabeledCount[]; // prompts grouped by permission mode
+  // Code-change activity (from Edit/Write tool results).
+  filesEditedCount: number; // edit/write results applied
+  linesAdded: number;
+  linesRemoved: number;
+  userModifiedCount: number; // edits the user later modified by hand
+  editResultCount: number; // denominator for the user-modified rate
+  gitOperations: number;
+  // Output-token split between the main thread and subagents (sidechains).
+  mainOutputTokens: number;
+  sidechainOutputTokens: number;
+  // 7×24 grid of assistant turns by local weekday (0=Sun) and hour.
+  heatmap: number[][];
+  // Most recent session titles (auto-generated), newest first.
+  recentTitles: { title: string; sessionId: string }[];
+}
+
 export interface ExtensionConfig {
   refreshInterval: number;
   dataDirectory: string;

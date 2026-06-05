@@ -6,6 +6,7 @@ import * as path from 'path';
 // Removed zod dependency - using native validation instead
 import { calculateCostBreakdown } from './pricing';
 import {
+  ActivityAnalysis,
   BranchUsage,
   ClaudeUsageRecord,
   ContentAnalysis,
@@ -98,6 +99,21 @@ interface AnalysisBucket {
   count: number;
 }
 
+// Per-tool activity counters (distinct from the token-estimate `tools` bucket).
+interface ToolActivity {
+  count: number;
+  errors: number;
+  totalDurationMs: number;
+  durationSamples: number;
+}
+
+interface SubagentActivity {
+  count: number;
+  totalTokens: number;
+  totalDurationMs: number;
+  totalToolUseCount: number;
+}
+
 interface AnalysisAcc {
   cat: Record<string, AnalysisBucket>;
   tools: Record<string, AnalysisBucket>;
@@ -105,11 +121,57 @@ interface AnalysisAcc {
   seenUuids: Set<string>;
   cutoffMs: number;
   prompts: { cwd: string; text: string }[];
+  // --- activity accumulators ---
+  toolActivity: Record<string, ToolActivity>;
+  skills: Record<string, number>;
+  subagents: Record<string, SubagentActivity>;
+  stopReasons: Record<string, number>;
+  permissionModes: Record<string, number>;
+  promptIds: Set<string>;
+  loosePromptCount: number;
+  prUrls: Set<string>;
+  filesEditedCount: number;
+  linesAdded: number;
+  linesRemoved: number;
+  userModifiedCount: number;
+  editResultCount: number;
+  gitOperations: number;
+  mainOutputTokens: number;
+  sidechainOutputTokens: number;
+  heatmap: number[][];
+  titlesBySession: Map<string, string>;
+  windowDays: number;
 }
 
 // cutoffMs: ignore log lines older than this (0 = no cutoff).
-function newAnalysisAcc(cutoffMs: number): AnalysisAcc {
-  return { cat: {}, tools: {}, toolIdToName: {}, seenUuids: new Set<string>(), cutoffMs, prompts: [] };
+function newAnalysisAcc(cutoffMs: number, windowDays: number): AnalysisAcc {
+  return {
+    cat: {},
+    tools: {},
+    toolIdToName: {},
+    seenUuids: new Set<string>(),
+    cutoffMs,
+    prompts: [],
+    toolActivity: {},
+    skills: {},
+    subagents: {},
+    stopReasons: {},
+    permissionModes: {},
+    promptIds: new Set<string>(),
+    loosePromptCount: 0,
+    prUrls: new Set<string>(),
+    filesEditedCount: 0,
+    linesAdded: 0,
+    linesRemoved: 0,
+    userModifiedCount: 0,
+    editResultCount: 0,
+    gitOperations: 0,
+    mainOutputTokens: 0,
+    sidechainOutputTokens: 0,
+    heatmap: Array.from({ length: 7 }, () => new Array<number>(24).fill(0)),
+    titlesBySession: new Map<string, string>(),
+    windowDays,
+  };
 }
 
 // Collect an actual user prompt (capped + truncated) for the AI-advice feature.
@@ -174,17 +236,104 @@ function addToBucket(map: Record<string, AnalysisBucket>, key: string, text: str
   map[key].count += 1;
 }
 
-// Accumulate one raw log line into the content analysis.
+const numOr0 = (v: unknown): number => (typeof v === 'number' && isFinite(v) ? v : 0);
+
+function bumpTool(acc: AnalysisAcc, name: string): ToolActivity {
+  let t = acc.toolActivity[name];
+  if (!t) {
+    t = { count: 0, errors: 0, totalDurationMs: 0, durationSamples: 0 };
+    acc.toolActivity[name] = t;
+  }
+  return t;
+}
+
+// Pull a human-readable skill name out of a Skill tool_use's input.
+function skillNameFromInput(input: unknown): string {
+  if (input && typeof input === 'object') {
+    const o = input as Record<string, unknown>;
+    for (const key of ['skill', 'command', 'name']) {
+      const v = o[key];
+      if (typeof v === 'string' && v.trim() !== '') {
+        return v.trim();
+      }
+    }
+  }
+  return 'unknown';
+}
+
+// Count added/removed lines from an Edit result's structured patch.
+function tallyPatch(acc: AnalysisAcc, patch: unknown): void {
+  if (!Array.isArray(patch)) {
+    return;
+  }
+  for (const hunk of patch) {
+    const lines = hunk && typeof hunk === 'object' ? (hunk as { lines?: unknown }).lines : null;
+    if (!Array.isArray(lines)) {
+      continue;
+    }
+    for (const line of lines) {
+      if (typeof line !== 'string') {
+        continue;
+      }
+      if (line.startsWith('+')) {
+        acc.linesAdded++;
+      } else if (line.startsWith('-')) {
+        acc.linesRemoved++;
+      }
+    }
+  }
+}
+
+// Fold the top-level `toolUseResult` of a user record into the activity stats:
+// subagent cost, git operations and code-change figures.
+function analyzeToolUseResult(acc: AnalysisAcc, tur: any, toolName: string | null): void {
+  if (!tur || typeof tur !== 'object') {
+    return;
+  }
+  // Subagent (Task/Agent) — the result carries the agent's own usage.
+  if (typeof tur.agentType === 'string') {
+    let s = acc.subagents[tur.agentType];
+    if (!s) {
+      s = { count: 0, totalTokens: 0, totalDurationMs: 0, totalToolUseCount: 0 };
+      acc.subagents[tur.agentType] = s;
+    }
+    s.count++;
+    s.totalTokens += numOr0(tur.totalTokens);
+    s.totalDurationMs += numOr0(tur.totalDurationMs);
+    s.totalToolUseCount += numOr0(tur.totalToolUseCount);
+  }
+  if (tur.gitOperation) {
+    acc.gitOperations++;
+  }
+  // Per-tool duration sample, when the tool reported timing.
+  if (typeof tur.durationMs === 'number' && toolName) {
+    const t = bumpTool(acc, toolName);
+    t.totalDurationMs += tur.durationMs;
+    t.durationSamples++;
+  }
+  // Code changes: edits carry a structured patch; writes carry full content.
+  if (Array.isArray(tur.structuredPatch)) {
+    acc.editResultCount++;
+    acc.filesEditedCount++;
+    if (tur.userModified) {
+      acc.userModifiedCount++;
+    }
+    tallyPatch(acc, tur.structuredPatch);
+  } else if (typeof tur.filePath === 'string' && typeof tur.content === 'string' && tur.oldString === undefined) {
+    acc.filesEditedCount++;
+    acc.linesAdded += tur.content.split('\n').length;
+  }
+}
+
+// Accumulate one raw log line into the content + activity analysis.
 function analyzeLine(parsed: any, acc: AnalysisAcc): void {
   if (!parsed || typeof parsed !== 'object') {
     return;
   }
   // Scope the analysis to a recent window so it reflects current habits.
-  if (acc.cutoffMs > 0) {
-    const ts = typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;
-    if (!isNaN(ts) && ts < acc.cutoffMs) {
-      return;
-    }
+  const tsMs = typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;
+  if (acc.cutoffMs > 0 && !isNaN(tsMs) && tsMs < acc.cutoffMs) {
+    return;
   }
   const uuid = typeof parsed.uuid === 'string' ? parsed.uuid : null;
   if (uuid) {
@@ -192,6 +341,26 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
       return;
     }
     acc.seenUuids.add(uuid);
+  }
+
+  // Standalone log events (no message payload).
+  const ptype = typeof parsed.type === 'string' ? parsed.type : '';
+  if (ptype === 'pr-link') {
+    const url = typeof parsed.prUrl === 'string' ? parsed.prUrl : '';
+    if (url) {
+      acc.prUrls.add(url);
+    }
+    return;
+  }
+  if (ptype === 'ai-title') {
+    const sid = typeof parsed.sessionId === 'string' ? parsed.sessionId : '';
+    const title = typeof parsed.aiTitle === 'string' ? parsed.aiTitle : '';
+    if (sid && title) {
+      // Re-insert so the most recently updated title sorts last (newest).
+      acc.titlesBySession.delete(sid);
+      acc.titlesBySession.set(sid, title);
+    }
+    return;
   }
 
   const message = parsed.message;
@@ -203,6 +372,23 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
   const cwd = typeof parsed.cwd === 'string' ? parsed.cwd : '';
 
   if (role === 'assistant') {
+    // Turn outcome and main/subagent output-token split.
+    if (typeof message.stop_reason === 'string') {
+      acc.stopReasons[message.stop_reason] = (acc.stopReasons[message.stop_reason] || 0) + 1;
+    }
+    const usage = message.usage;
+    if (usage && typeof usage.output_tokens === 'number') {
+      if (parsed.isSidechain) {
+        acc.sidechainOutputTokens += usage.output_tokens;
+      } else {
+        acc.mainOutputTokens += usage.output_tokens;
+      }
+    }
+    // Activity heatmap: one assistant turn per local weekday/hour cell.
+    if (!isNaN(tsMs)) {
+      const d = new Date(tsMs);
+      acc.heatmap[d.getDay()][d.getHours()]++;
+    }
     if (Array.isArray(content)) {
       for (const block of content) {
         if (!block || typeof block !== 'object') {
@@ -217,15 +403,29 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
             acc.toolIdToName[block.id] = block.name;
           }
           addToBucket(acc.cat, 'toolCalls', JSON.stringify(block.input || {}));
+          if (typeof block.name === 'string') {
+            bumpTool(acc, block.name).count++;
+            if (block.name === 'Skill') {
+              const sk = skillNameFromInput(block.input);
+              acc.skills[sk] = (acc.skills[sk] || 0) + 1;
+            }
+          }
         }
       }
     } else if (typeof content === 'string') {
       addToBucket(acc.cat, 'assistantText', content);
     }
   } else if (role === 'user') {
+    const isMeta = parsed.isMeta === true;
+    let hasRealText = false;
+    let recordToolName: string | null = null;
+
     if (typeof content === 'string') {
       addToBucket(acc.cat, 'userPrompts', content);
       collectPrompt(acc, cwd, content);
+      if (content.trim().length >= 4) {
+        hasRealText = true;
+      }
     } else if (Array.isArray(content)) {
       for (const block of content) {
         if (!block || typeof block !== 'object') {
@@ -234,13 +434,36 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
         if (block.type === 'tool_result') {
           const text = blockText(block.content);
           addToBucket(acc.cat, 'toolResults', text);
-          addToBucket(acc.tools, acc.toolIdToName[block.tool_use_id] || 'unknown', text);
+          const toolName = acc.toolIdToName[block.tool_use_id] || 'unknown';
+          addToBucket(acc.tools, toolName, text);
+          recordToolName = toolName;
+          if (block.is_error) {
+            bumpTool(acc, toolName).errors++;
+          }
         } else if (block.type === 'text' && typeof block.text === 'string') {
           addToBucket(acc.cat, 'userPrompts', block.text);
           collectPrompt(acc, cwd, block.text);
+          if (block.text.trim().length >= 4) {
+            hasRealText = true;
+          }
         }
       }
     }
+
+    // Count a real, human-authored prompt once, and the mode it ran under.
+    if (!isMeta && hasRealText) {
+      const promptId = typeof parsed.promptId === 'string' ? parsed.promptId : '';
+      if (promptId) {
+        acc.promptIds.add(promptId);
+      } else {
+        acc.loosePromptCount++;
+      }
+      if (typeof parsed.permissionMode === 'string') {
+        acc.permissionModes[parsed.permissionMode] = (acc.permissionModes[parsed.permissionMode] || 0) + 1;
+      }
+    }
+
+    analyzeToolUseResult(acc, parsed.toolUseResult, recordToolName);
   }
 }
 
@@ -256,6 +479,59 @@ function finalizeAnalysis(acc: AnalysisAcc): ContentAnalysis {
     toolResultBreakdown: toSlices(acc.tools),
     totalEstimatedTokens: categories.reduce((sum, c) => sum + c.estimatedTokens, 0),
     recentPrompts: acc.prompts.slice(-300),
+  };
+}
+
+function finalizeActivity(acc: AnalysisAcc): ActivityAnalysis {
+  const tools = Object.entries(acc.toolActivity)
+    .map(([name, t]) => ({
+      name,
+      count: t.count,
+      errors: t.errors,
+      totalDurationMs: t.totalDurationMs,
+      durationSamples: t.durationSamples,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const skills = Object.entries(acc.skills)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const subagents = Object.entries(acc.subagents)
+    .map(([agentType, s]) => ({ agentType, ...s }))
+    .sort((a, b) => b.count - a.count);
+
+  const labeled = (rec: Record<string, number>) =>
+    Object.entries(rec)
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+
+  const recentTitles = Array.from(acc.titlesBySession.entries())
+    .slice(-30)
+    .reverse()
+    .map(([sessionId, title]) => ({ sessionId, title }));
+
+  return {
+    windowDays: acc.windowDays,
+    totalToolCalls: tools.reduce((sum, t) => sum + t.count, 0),
+    toolErrors: tools.reduce((sum, t) => sum + t.errors, 0),
+    tools,
+    skills,
+    subagents,
+    promptCount: acc.promptIds.size + acc.loosePromptCount,
+    prCount: acc.prUrls.size,
+    stopReasons: labeled(acc.stopReasons),
+    permissionModes: labeled(acc.permissionModes),
+    filesEditedCount: acc.filesEditedCount,
+    linesAdded: acc.linesAdded,
+    linesRemoved: acc.linesRemoved,
+    userModifiedCount: acc.userModifiedCount,
+    editResultCount: acc.editResultCount,
+    gitOperations: acc.gitOperations,
+    mainOutputTokens: acc.mainOutputTokens,
+    sidechainOutputTokens: acc.sidechainOutputTokens,
+    heatmap: acc.heatmap,
+    recentTitles,
   };
 }
 
@@ -320,7 +596,7 @@ export class ClaudeDataLoader {
   static async loadUsageRecords(
     dataDirectory?: string,
     options?: { analyzeContent?: boolean }
-  ): Promise<{ records: ClaudeUsageRecord[]; contentAnalysis: ContentAnalysis | null }> {
+  ): Promise<{ records: ClaudeUsageRecord[]; contentAnalysis: ContentAnalysis | null; activityAnalysis: ActivityAnalysis | null }> {
     const analyzeContent = options?.analyzeContent !== false; // default true
     try {
       const claudePaths = dataDirectory ? [dataDirectory] : this.getClaudePaths();
@@ -339,7 +615,7 @@ export class ClaudeDataLoader {
       const records: ClaudeUsageRecord[] = [];
       // Content analysis (last 30 days) is optional — skipped when the user
       // disables it via claudeCodeUsage.enableContentAnalysis.
-      const analysis = analyzeContent ? newAnalysisAcc(Date.now() - 30 * 24 * 60 * 60 * 1000) : null;
+      const analysis = analyzeContent ? newAnalysisAcc(Date.now() - 30 * 24 * 60 * 60 * 1000, 30) : null;
       let fileIndex = 0;
 
       for (const file of sortedFiles) {
@@ -408,10 +684,14 @@ export class ClaudeDataLoader {
         }
       }
 
-      return { records, contentAnalysis: analysis ? finalizeAnalysis(analysis) : null };
+      return {
+        records,
+        contentAnalysis: analysis ? finalizeAnalysis(analysis) : null,
+        activityAnalysis: analysis ? finalizeActivity(analysis) : null,
+      };
     } catch (error) {
       console.error('Error loading usage records:', error);
-      return { records: [], contentAnalysis: null };
+      return { records: [], contentAnalysis: null, activityAnalysis: null };
     }
   }
 
