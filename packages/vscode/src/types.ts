@@ -182,6 +182,10 @@ export interface ExtensionConfig {
   timezone: string;
   // Fetch real 5-hour / weekly limit utilisation via Claude Code's OAuth session.
   usageLimitTracking: boolean;
+  // Append a timestamped snapshot of the fetched quota utilisation to
+  // ~/.claude/cc-monitor/quota-history.jsonl on each refresh, for the Quota tab
+  // and CSV/JSON export. No effect when usageLimitTracking is off.
+  recordQuotaHistory: boolean;
   // Run the (CPU-heavy) content/prompt-token analysis. When false the Content
   // tab is hidden and the analysis is skipped during refresh.
   enableContentAnalysis: boolean;
