@@ -34,6 +34,10 @@ export interface Translations {
     sigCacheBust: string;
     sigLargeBaseline: string;
     sigFullFileReads: string;
+    sigContextDegradation: string;
+    sigRepeatedCalls: string;
+    errorByContext: string;
+    repeatedCall: string;
     efficiency: string;
     cacheWaste: string;
     baseline: string;
@@ -146,6 +150,12 @@ export interface Translations {
     tokenSplit: string;
     mainThread: string;
     subagentsLabel: string;
+    efficiencyTitle: string;
+    avgOutputPerTurn: string;
+    thinkingShare: string;
+    subagentTokens: string;
+    avgSubagentTokens: string;
+    efficiencyNote: string;
     activityHeatmap: string;
     heatmapHint: string;
     recentTopics: string;
@@ -204,6 +214,10 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigCacheBust: 'Cache repeatedly invalidated (costly re-writes)',
       sigLargeBaseline: 'Large startup context (system prompt / CLAUDE.md / tools)',
       sigFullFileReads: 'Whole files read without line ranges',
+      sigContextDegradation: 'Tool errors rise as the context grows',
+      sigRepeatedCalls: 'Same tool call repeated (possible loop)',
+      errorByContext: 'Tool errors low → high context',
+      repeatedCall: 'Most-repeated call',
       efficiency: 'Token efficiency',
       cacheWaste: 'Cache waste',
       baseline: 'Startup baseline',
@@ -315,6 +329,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: 'Main vs Subagent (output tokens)',
       mainThread: 'Main thread',
       subagentsLabel: 'Subagents',
+      efficiencyTitle: 'Token efficiency',
+      avgOutputPerTurn: 'Avg output / turn',
+      thinkingShare: 'Thinking share',
+      subagentTokens: 'Subagent tokens',
+      avgSubagentTokens: 'Avg tokens / subagent',
+      efficiencyNote: 'Subagents multiply token spend (multi-agent runs ~15×, agent teams ~7×) — worth it only for high-value work. Thinking tokens are billed as output.',
       activityHeatmap: 'Activity Heatmap',
       heatmapHint: 'Assistant turns by weekday and hour',
       recentTopics: 'Recent Session Topics',
@@ -370,6 +390,10 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigCacheBust: "Cache wiederholt verworfen (teure Neuschreibungen)",
       sigLargeBaseline: "Großer Startkontext (System-Prompt / CLAUDE.md / Tools)",
       sigFullFileReads: "Ganze Dateien ohne Zeilenbereich gelesen",
+      sigContextDegradation: "Tool-Fehler nehmen mit wachsendem Kontext zu",
+      sigRepeatedCalls: "Gleicher Tool-Aufruf wiederholt (mögliche Schleife)",
+      errorByContext: "Tool-Fehler bei niedrigem → hohem Kontext",
+      repeatedCall: "Häufigster Aufruf",
       efficiency: "Token-Effizienz",
       cacheWaste: "Cache-Verschwendung",
       baseline: "Start-Grundlast",
@@ -483,6 +507,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: "Haupt vs. Subagent (Ausgabe-Token)",
       mainThread: "Hauptthread",
       subagentsLabel: "Subagenten",
+      efficiencyTitle: "Token-Effizienz",
+      avgOutputPerTurn: "Ø Ausgabe / Zug",
+      thinkingShare: "Thinking-Anteil",
+      subagentTokens: "Subagent-Token",
+      avgSubagentTokens: "Ø Token / Subagent",
+      efficiencyNote: "Subagenten vervielfachen den Token-Verbrauch (Multi-Agent ~15×, Agent-Teams ~7×) — nur für hochwertige Arbeit lohnend. Thinking-Token werden als Ausgabe abgerechnet.",
       activityHeatmap: "Aktivitäts-Heatmap",
       heatmapHint: "Assistent-Turns nach Wochentag und Stunde",
       recentTopics: "Letzte Sitzungsthemen",
@@ -538,6 +568,10 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigCacheBust: '快取反覆失效（昂貴的重寫）',
       sigLargeBaseline: '啟動上下文龐大（系統提示／CLAUDE.md／工具）',
       sigFullFileReads: '未指定行範圍而讀取整個檔案',
+      sigContextDegradation: '隨上下文增大，工具錯誤增加',
+      sigRepeatedCalls: '同一工具呼叫重複（可能陷入迴圈）',
+      errorByContext: '工具錯誤：低 → 高上下文',
+      repeatedCall: '重複最多的呼叫',
       efficiency: 'Token 效率',
       cacheWaste: '快取浪費',
       baseline: '啟動基準量',
@@ -649,6 +683,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: '主執行緒 vs 子代理（輸出 Token）',
       mainThread: '主執行緒',
       subagentsLabel: '子代理',
+      efficiencyTitle: 'Token 效率',
+      avgOutputPerTurn: '平均輸出 / 回合',
+      thinkingShare: '思考佔比',
+      subagentTokens: '子代理 Token',
+      avgSubagentTokens: '平均 Token / 子代理',
+      efficiencyNote: '子代理會成倍消耗 Token（多代理約 15×、代理團隊約 7×），僅在高價值任務才划算。思考 Token 以輸出計費。',
       activityHeatmap: '活動熱圖',
       heatmapHint: '依星期與時段的助手回合數',
       recentTopics: '近期會話主題',
@@ -704,6 +744,10 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigCacheBust: '缓存反复失效（代价高昂的重写）',
       sigLargeBaseline: '启动上下文庞大（系统提示／CLAUDE.md／工具）',
       sigFullFileReads: '未指定行范围而读取整个文件',
+      sigContextDegradation: '随上下文增大，工具错误增加',
+      sigRepeatedCalls: '同一工具调用重复（可能陷入循环）',
+      errorByContext: '工具错误：低 → 高上下文',
+      repeatedCall: '重复最多的调用',
       efficiency: 'Token 效率',
       cacheWaste: '缓存浪费',
       baseline: '启动基准量',
@@ -815,6 +859,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: '主线程 vs 子代理（输出 Token）',
       mainThread: '主线程',
       subagentsLabel: '子代理',
+      efficiencyTitle: 'Token 效率',
+      avgOutputPerTurn: '平均输出 / 回合',
+      thinkingShare: '思考占比',
+      subagentTokens: '子代理 Token',
+      avgSubagentTokens: '平均 Token / 子代理',
+      efficiencyNote: '子代理会成倍消耗 Token（多代理约 15×、代理团队约 7×），仅在高价值任务才划算。思考 Token 以输出计费。',
       activityHeatmap: '活动热图',
       heatmapHint: '按星期与时段的助手回合数',
       recentTopics: '近期会话主题',
@@ -869,6 +919,10 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigCacheBust: 'キャッシュが繰り返し無効化（高コストな再書き込み）',
       sigLargeBaseline: '起動コンテキストが大きい（システムプロンプト／CLAUDE.md／ツール）',
       sigFullFileReads: '行範囲を指定せずファイル全体を読み込み',
+      sigContextDegradation: 'コンテキスト増大に伴いツールエラーが増加',
+      sigRepeatedCalls: '同じツール呼び出しが繰り返し（ループの可能性）',
+      errorByContext: 'ツールエラー: 低→高コンテキスト',
+      repeatedCall: '最も繰り返された呼び出し',
       efficiency: 'トークン効率',
       cacheWaste: 'キャッシュ浪費',
       baseline: '起動ベースライン',
@@ -981,6 +1035,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: 'メイン vs サブエージェント（出力トークン）',
       mainThread: 'メインスレッド',
       subagentsLabel: 'サブエージェント',
+      efficiencyTitle: 'トークン効率',
+      avgOutputPerTurn: '平均出力 / ターン',
+      thinkingShare: 'thinking 比率',
+      subagentTokens: 'サブエージェントのトークン',
+      avgSubagentTokens: '平均トークン / サブエージェント',
+      efficiencyNote: 'サブエージェントはトークン消費を増やします（マルチエージェント約15倍、エージェントチーム約7倍）。高価値なタスクでのみ見合います。thinking トークンは出力として課金されます。',
       activityHeatmap: 'アクティビティ ヒートマップ',
       heatmapHint: '曜日×時間帯ごとのアシスタント ターン数',
       recentTopics: '最近のセッション トピック',
@@ -1035,6 +1095,10 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigCacheBust: '캐시가 반복적으로 무효화됨(비용이 큰 재작성)',
       sigLargeBaseline: '시작 컨텍스트가 큼(시스템 프롬프트／CLAUDE.md／도구)',
       sigFullFileReads: '행 범위 없이 파일 전체를 읽음',
+      sigContextDegradation: '컨텍스트가 커질수록 도구 오류 증가',
+      sigRepeatedCalls: '같은 도구 호출 반복(루프 가능성)',
+      errorByContext: '도구 오류: 낮은 → 높은 컨텍스트',
+      repeatedCall: '가장 많이 반복된 호출',
       efficiency: '토큰 효율',
       cacheWaste: '캐시 낭비',
       baseline: '시작 베이스라인',
@@ -1147,6 +1211,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: '메인 vs 서브에이전트 (출력 토큰)',
       mainThread: '메인 스레드',
       subagentsLabel: '서브에이전트',
+      efficiencyTitle: '토큰 효율',
+      avgOutputPerTurn: '평균 출력 / 턴',
+      thinkingShare: '사고(thinking) 비중',
+      subagentTokens: '서브에이전트 토큰',
+      avgSubagentTokens: '평균 토큰 / 서브에이전트',
+      efficiencyNote: '서브에이전트는 토큰 소비를 배가합니다(멀티에이전트 약 15배, 에이전트 팀 약 7배). 고가치 작업에서만 가치가 있습니다. 사고 토큰은 출력으로 청구됩니다.',
       activityHeatmap: '활동 히트맵',
       heatmapHint: '요일·시간대별 어시스턴트 턴 수',
       recentTopics: '최근 세션 주제',

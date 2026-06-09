@@ -121,7 +121,9 @@ export interface ContextRotSignal {
     | 'multiTopic'
     | 'cacheBust'
     | 'largeBaseline'
-    | 'fullFileReads';
+    | 'fullFileReads'
+    | 'contextDegradation'
+    | 'repeatedCalls';
   // Contextual numbers for the renderer (a percentage, a count, or minutes,
   // depending on `kind`).
   value?: number;
@@ -164,6 +166,15 @@ export interface ContextHealth {
   reclaimableTokens: number;
   // Read tool calls that dumped a whole file (no offset/limit line range).
   fullFileReads: number;
+  // Quality-aware context-rot proxy: tool-error rate (%) in the lower vs upper
+  // half of the context window — a local stand-in for length-driven
+  // degradation. -1 when there isn't enough sample to compute.
+  errorRateLowCtx: number;
+  errorRateHighCtx: number;
+  // Snowball / looping: the most-repeated identical (non-Read) tool call in the
+  // session, and a readable label (the tool name) for it.
+  maxRepeatedCall: number;
+  maxRepeatedCallLabel: string;
   status: 'healthy' | 'watch' | 'rot';
   // Down-sampled context-window sizes over the session, oldest→newest (sparkline).
   contextSeries: number[];
@@ -232,6 +243,12 @@ export interface ActivityAnalysis {
   // Output-token split between the main thread and subagents (sidechains).
   mainOutputTokens: number;
   sidechainOutputTokens: number;
+  // Verbosity / thinking-budget view: billable main-thread assistant turns, and
+  // estimated thinking vs visible-text tokens the assistant produced (offline
+  // estimate from block text, across main + subagent turns).
+  assistantTurns: number;
+  thinkingTokensEst: number;
+  assistantTextTokensEst: number;
   // 7×24 grid of assistant turns by local weekday (0=Sun) and hour.
   heatmap: number[][];
   // Most recent session titles (auto-generated), newest first.

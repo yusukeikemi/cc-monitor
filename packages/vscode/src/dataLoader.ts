@@ -140,6 +140,7 @@ interface AnalysisAcc {
   gitOperations: number;
   mainOutputTokens: number;
   sidechainOutputTokens: number;
+  assistantTurns: number; // billable main-thread assistant turns
   heatmap: number[][];
   titlesBySession: Map<string, string>;
   windowDays: number;
@@ -170,6 +171,7 @@ function newAnalysisAcc(cutoffMs: number, windowDays: number): AnalysisAcc {
     gitOperations: 0,
     mainOutputTokens: 0,
     sidechainOutputTokens: 0,
+    assistantTurns: 0,
     heatmap: Array.from({ length: 7 }, () => new Array<number>(24).fill(0)),
     titlesBySession: new Map<string, string>(),
     windowDays,
@@ -289,6 +291,35 @@ function skillNameFromInput(input: unknown): string {
     }
   }
   return 'unknown';
+}
+
+// Build a stable key identifying a tool call by its primary argument, so that
+// identical repeated calls (a loop) collapse to the same key. Keyed by the
+// tool name plus the salient input (command / pattern / path). Returns '' when
+// there's no meaningful argument to key on.
+function repeatedCallKey(name: string, input: Record<string, unknown>): string {
+  const pick = (k: string): string => (typeof input[k] === 'string' ? (input[k] as string) : '');
+  let arg = '';
+  switch (name) {
+    case 'Bash':
+      arg = pick('command');
+      break;
+    case 'Grep':
+    case 'Glob':
+      arg = pick('pattern');
+      break;
+    default:
+      arg = pick('file_path') || pick('path') || pick('query') || pick('prompt');
+      if (!arg) {
+        try {
+          arg = JSON.stringify(input).slice(0, 200);
+        } catch {
+          arg = '';
+        }
+      }
+  }
+  arg = arg.trim();
+  return arg ? name + ' ' + arg : '';
 }
 
 // Count added/removed lines from an Edit result's structured patch.
@@ -412,6 +443,7 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
         acc.sidechainOutputTokens += usage.output_tokens;
       } else {
         acc.mainOutputTokens += usage.output_tokens;
+        acc.assistantTurns++;
       }
     }
     // Activity heatmap: one assistant turn per local weekday/hour cell.
@@ -560,6 +592,9 @@ function finalizeActivity(acc: AnalysisAcc): ActivityAnalysis {
     gitOperations: acc.gitOperations,
     mainOutputTokens: acc.mainOutputTokens,
     sidechainOutputTokens: acc.sidechainOutputTokens,
+    assistantTurns: acc.assistantTurns,
+    thinkingTokensEst: acc.cat['assistantThinking']?.tokens || 0,
+    assistantTextTokensEst: acc.cat['assistantText']?.tokens || 0,
     heatmap: acc.heatmap,
     recentTitles,
   };
@@ -821,6 +856,9 @@ export class ClaudeDataLoader {
     let sumRead = 0, sumCreate = 0, sumInput = 0; // session totals for the cache hit rate
     const toolResultSizes: number[] = []; // estimated tokens of each individual tool_result
     let fullFileReads = 0; // Read calls with no offset/limit (whole-file dumps)
+    let currentCtx = 0; // running context size (latest assistant turn so far)
+    const toolEvents: { ctx: number; error: boolean }[] = []; // per tool_result, for #4
+    const callCounts: Record<string, number> = {}; // identical non-Read tool calls, for #7
     const ctxSeries: { ts: number; ctx: number }[] = []; // context size per assistant turn
     const lineEst: { ts: number; est: number }[] = []; // per-message token estimate (any role)
     const promptTexts: { ts: number; text: string }[] = []; // real user prompts (for topics)
@@ -861,6 +899,7 @@ export class ClaudeDataLoader {
             if (sz > 0) {
               toolResultSizes.push(sz);
             }
+            toolEvents.push({ ctx: currentCtx, error: block.is_error === true });
           }
         }
       }
@@ -868,6 +907,7 @@ export class ClaudeDataLoader {
       if (role === 'assistant' && message.usage) {
         const ctx = this.recordContextTokens({ message } as ClaudeUsageRecord);
         peakContextTokens = Math.max(peakContextTokens, ctx);
+        currentCtx = ctx;
         const u = message.usage;
         const read = u.cache_read_input_tokens || 0;
         const create = u.cache_creation_input_tokens || 0;
@@ -886,11 +926,15 @@ export class ClaudeDataLoader {
             model = message.model;
           }
         }
-        // Count Read tool_use file paths for redundant-read detection.
+        // Count Read file paths (redundant reads) and identical non-Read calls
+        // (looping / snowball detection).
         if (Array.isArray(message.content)) {
           for (const block of message.content) {
-            if (block && block.type === 'tool_use' && block.name === 'Read') {
-              const inp2 = block.input && typeof block.input === 'object' ? block.input : {};
+            if (!block || block.type !== 'tool_use' || typeof block.name !== 'string') {
+              continue;
+            }
+            const inp2 = block.input && typeof block.input === 'object' ? block.input : {};
+            if (block.name === 'Read') {
               const fp = typeof inp2.file_path === 'string' ? inp2.file_path : '';
               if (fp) {
                 readCounts[fp] = (readCounts[fp] || 0) + 1;
@@ -898,6 +942,11 @@ export class ClaudeDataLoader {
               // A Read with neither offset nor limit dumps the entire file.
               if (inp2.offset == null && inp2.limit == null) {
                 fullFileReads++;
+              }
+            } else {
+              const key = repeatedCallKey(block.name, inp2);
+              if (key) {
+                callCounts[key] = (callCounts[key] || 0) + 1;
               }
             }
           }
@@ -1080,6 +1129,37 @@ export class ClaudeDataLoader {
       }
     }
 
+    // Quality-aware context-rot: compare tool-error rate in the lower vs upper
+    // half of the window (a local proxy for length-driven degradation). is_error
+    // also captures user rejections, so treat the rates as a rough signal.
+    const splitCtx = contextLimit * 0.5;
+    let loTotal = 0, loErr = 0, hiTotal = 0, hiErr = 0;
+    for (const ev of toolEvents) {
+      if (ev.ctx <= 0) {
+        continue;
+      }
+      if (ev.ctx < splitCtx) {
+        loTotal++;
+        if (ev.error) loErr++;
+      } else {
+        hiTotal++;
+        if (ev.error) hiErr++;
+      }
+    }
+    const errorRateLowCtx = loTotal >= 5 ? (loErr / loTotal) * 100 : -1;
+    const errorRateHighCtx = hiTotal >= 5 ? (hiErr / hiTotal) * 100 : -1;
+
+    // Snowball / looping: the most-repeated identical non-Read tool call.
+    let maxRepeatedCall = 0;
+    let maxRepeatedCallKeyStr = '';
+    for (const [k, n] of Object.entries(callCounts)) {
+      if (n > maxRepeatedCall) {
+        maxRepeatedCall = n;
+        maxRepeatedCallKeyStr = k;
+      }
+    }
+    const maxRepeatedCallLabel = maxRepeatedCallKeyStr.split(' ')[0] || '';
+
     if (cacheWastedTokens >= 20000) {
       signals.push({ kind: 'cacheBust', value: cacheBustCount });
     }
@@ -1088,6 +1168,12 @@ export class ClaudeDataLoader {
     }
     if (fullFileReads >= 5) {
       signals.push({ kind: 'fullFileReads', value: fullFileReads });
+    }
+    if (errorRateLowCtx >= 0 && errorRateHighCtx >= 0 && errorRateHighCtx >= Math.max(10, errorRateLowCtx * 1.5)) {
+      signals.push({ kind: 'contextDegradation', value: Math.round(errorRateHighCtx) });
+    }
+    if (maxRepeatedCall >= 4) {
+      signals.push({ kind: 'repeatedCalls', label: maxRepeatedCallLabel, value: maxRepeatedCall });
     }
 
     // --- Overall status ---
@@ -1118,6 +1204,10 @@ export class ClaudeDataLoader {
       baselineTokens,
       reclaimableTokens,
       fullFileReads,
+      errorRateLowCtx,
+      errorRateHighCtx,
+      maxRepeatedCall,
+      maxRepeatedCallLabel,
       status,
       contextSeries,
       growthTokensPerMin,

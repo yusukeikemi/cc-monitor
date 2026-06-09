@@ -1602,6 +1602,22 @@ export class UsageWebviewProvider {
         '</div></div>';
     }
 
+    // --- token efficiency: verbosity, thinking budget, subagent overhead ---
+    const subagentTokens = a.subagents.reduce((s, x) => s + x.totalTokens, 0);
+    const subagentCount = a.subagents.reduce((s, x) => s + x.count, 0);
+    const avgOut = a.assistantTurns > 0 ? Math.round(a.mainOutputTokens / a.assistantTurns) : 0;
+    const thinkDen = a.thinkingTokensEst + a.assistantTextTokensEst;
+    const thinkShare = thinkDen > 0 ? (a.thinkingTokensEst / thinkDen) * 100 : 0;
+    const effCards =
+      card(t.avgOutputPerTurn, num(avgOut)) +
+      card(t.thinkingShare, thinkShare.toFixed(0) + '%') +
+      (subagentCount > 0 ? card(t.subagentTokens, num(subagentTokens)) : '') +
+      (subagentCount > 0 ? card(t.avgSubagentTokens, num(Math.round(subagentTokens / subagentCount))) : '');
+    const efficiencySection =
+      '<div class="daily-breakdown"><h3>' + t.efficiencyTitle + '</h3>' +
+      '<div class="usage-summary"><div class="summary-grid">' + effCards + '</div></div>' +
+      '<p class="table-hint">' + t.efficiencyNote + '</p></div>';
+
     // --- activity heatmap (weekday × hour) ---
     const heatMax = Math.max(...a.heatmap.flat(), 1);
     let hourHeader = '<div class="hm-row"><div class="hm-label"></div>';
@@ -1647,6 +1663,7 @@ export class UsageWebviewProvider {
       turnsSection +
       permSection +
       splitSection +
+      efficiencySection +
       heatmapSection +
       topicsSection
     );
@@ -1932,6 +1949,18 @@ export class UsageWebviewProvider {
         '<div class="ch-winrow ch-muted"><span>' + t.fullFileReadsLabel + '</span><span>×' + h.fullFileReads + '</span></div>'
       );
     }
+    if (h.errorRateLowCtx >= 0 && h.errorRateHighCtx >= 0) {
+      effRows.push(
+        '<div class="ch-winrow"><span>' + t.errorByContext + '</span>' +
+        '<span>' + Math.round(h.errorRateLowCtx) + '% → ' + Math.round(h.errorRateHighCtx) + '%</span></div>'
+      );
+    }
+    if (h.maxRepeatedCall >= 2) {
+      effRows.push(
+        '<div class="ch-winrow ch-muted"><span>' + t.repeatedCall + '</span>' +
+        '<span>' + this.escapeHtml(h.maxRepeatedCallLabel) + ' ×' + h.maxRepeatedCall + '</span></div>'
+      );
+    }
     const efficiencyBlock =
       '<div class="ch-card"><h3>' + t.efficiency + '</h3><div class="ch-window">' + effRows.join('') + '</div></div>';
 
@@ -2032,6 +2061,10 @@ export class UsageWebviewProvider {
         return t.sigLargeBaseline + ' (~' + s.value + 'k)';
       case 'fullFileReads':
         return t.sigFullFileReads + ' (×' + s.value + ')';
+      case 'contextDegradation':
+        return t.sigContextDegradation + ' (' + s.value + '%)';
+      case 'repeatedCalls':
+        return t.sigRepeatedCalls + ': ' + (s.label || '') + ' ×' + s.value;
       default:
         return '';
     }
