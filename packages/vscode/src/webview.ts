@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { I18n } from './i18n';
 import { getModelRatesPerMillion } from './pricing';
 import { QuotaSnapshot } from './quotaHistory';
-import { ActivityAnalysis, BranchUsage, ContentAnalysis, ProjectGroup, ProjectUsage, SessionData, SessionUsage, UsageData } from './types';
+import { ActivityAnalysis, BranchUsage, ContentAnalysis, ContextHealth, ContextRotSignal, ProjectGroup, ProjectUsage, SessionData, SessionUsage, UsageData } from './types';
 
 export class UsageWebviewProvider {
   private panel: vscode.WebviewPanel | undefined;
@@ -25,6 +25,7 @@ export class UsageWebviewProvider {
   private branchBreakdown: BranchUsage[] = [];
   private activityAnalysis: ActivityAnalysis | null = null;
   private quotaHistory: QuotaSnapshot[] = [];
+  private contextHealth: ContextHealth | null = null;
   // True once the dashboard shell (document + script) is live in the panel, so
   // subsequent refreshes can swap just the inner content instead of reloading
   // the whole document (which flashed the panel blank on every refresh).
@@ -117,7 +118,8 @@ export class UsageWebviewProvider {
     contentAnalysis: ContentAnalysis | null = null,
     branchBreakdown: BranchUsage[] = [],
     activityAnalysis: ActivityAnalysis | null = null,
-    quotaHistory: QuotaSnapshot[] = []
+    quotaHistory: QuotaSnapshot[] = [],
+    contextHealth: ContextHealth | null = null
   ): void {
     this.currentSessionData = sessionData;
     this.todayData = todayData;
@@ -138,6 +140,7 @@ export class UsageWebviewProvider {
     this.branchBreakdown = branchBreakdown;
     this.activityAnalysis = activityAnalysis;
     this.quotaHistory = quotaHistory;
+    this.contextHealth = contextHealth;
 
     if (this.panel) {
       this.updateWebview();
@@ -325,6 +328,18 @@ export class UsageWebviewProvider {
     const branchesActive = this.currentTab === 'branches' ? 'active' : '';
     const activityActive = this.currentTab === 'activity' ? 'active' : '';
     const quotaActive = this.currentTab === 'quota' ? 'active' : '';
+    const contextHealthActive = this.currentTab === 'contextHealth' ? 'active' : '';
+
+    // The Context Health tab is shown only when an active session's health was
+    // computed (enableContextHealth on, and a current session exists).
+    const contextHealthEnabled = this.contextHealth !== null;
+    const contextHealthTabButton = contextHealthEnabled
+      ? '<button id="tab-contextHealth" class="tab ' + contextHealthActive +
+        '" onclick="showTab(\'contextHealth\')">' + I18n.t.contextHealth.title + '</button>'
+      : '';
+    const contextHealthTabContent = contextHealthEnabled
+      ? '<div id="contextHealth" class="tab-content ' + contextHealthActive + '">' + this.renderContextHealthData() + '</div>'
+      : '';
 
     // The Content tab is hidden when content analysis is disabled via
     // claudeCodeUsage.enableContentAnalysis (the analyser returned null).
@@ -407,6 +422,9 @@ export class UsageWebviewProvider {
       `" onclick="showTab('quota')">` +
       I18n.t.popup.quotaHistory +
       `</button>
+            ` +
+      contextHealthTabButton +
+      `
           </div>
 
           <div id="today" class="tab-content ` +
@@ -472,6 +490,10 @@ export class UsageWebviewProvider {
       this.renderQuotaData() +
       `
           </div>
+
+          ` +
+      contextHealthTabContent +
+      `
     `
     );
   }
@@ -1749,6 +1771,193 @@ export class UsageWebviewProvider {
     );
   }
 
+  // Chart palette reused across the Context Health visualisations.
+  private static CH_PALETTE = [
+    'var(--vscode-charts-blue)',
+    'var(--vscode-charts-green)',
+    'var(--vscode-charts-orange)',
+    'var(--vscode-charts-purple)',
+    'var(--vscode-charts-red)',
+    'var(--vscode-charts-yellow)',
+  ];
+
+  /** The "Context Health" dashboard tab for the active session. */
+  private renderContextHealthData(): string {
+    const h = this.contextHealth;
+    const t = I18n.t.contextHealth;
+    const p = I18n.t.popup;
+    if (!h) {
+      return '<div class="no-data">' + p.noDataMessage + '</div>';
+    }
+    const num = (n: number): string => I18n.formatNumber(n);
+    const pct = Math.round(h.fillRatio * 100);
+    const statusLabel = h.status === 'rot' ? t.statusRot : h.status === 'watch' ? t.statusWatch : t.statusHealthy;
+    const palette = UsageWebviewProvider.CH_PALETTE;
+    const catLabel = (key: string): string => {
+      switch (key) {
+        case 'userPrompts':
+          return p.catUserPrompts;
+        case 'assistantText':
+          return p.catAssistantText;
+        case 'assistantThinking':
+          return p.catAssistantThinking;
+        case 'toolCalls':
+          return p.catToolCalls;
+        case 'toolResults':
+          return p.catToolResults;
+        default:
+          return key;
+      }
+    };
+
+    // Header + window-fill bar.
+    const header =
+      '<div class="ch-head ch-' + h.status + '">' +
+      '<span class="ch-badge">' + statusLabel + '</span>' +
+      '<span class="ch-sub">' + this.escapeHtml(h.projectName) + ' · ' + this.escapeHtml(h.model || '') + '</span>' +
+      '</div>';
+    let paceLine = '';
+    if (h.growthTokensPerMin && h.growthTokensPerMin > 0) {
+      paceLine = '<div class="ch-pace">' + t.pace + ': +' + num(h.growthTokensPerMin) + '/min';
+      if (h.etaToLimitMin) {
+        paceLine += ' · ' + t.etaToLimit + ' ~' + h.etaToLimitMin + 'm';
+      }
+      paceLine += '</div>';
+    }
+    const windowBlock =
+      '<div class="ch-window">' +
+      '<div class="ch-winrow"><span>' + t.windowSize + '</span><span><b>' + num(h.contextTokens) + '</b> / ' + num(h.contextLimit) + ' (' + pct + '%)</span></div>' +
+      '<div class="ch-fill"><div class="ch-fillbar ch-fill-' + h.status + '" style="width:' + Math.min(100, pct) + '%;"></div></div>' +
+      '<div class="ch-winrow ch-muted"><span>' + t.peak + '</span><span>' + num(h.peakContextTokens) + '</span></div>' +
+      paceLine +
+      '</div>';
+
+    // Composition donut (CSS conic-gradient) + legend.
+    const total = h.composition.reduce((s, c) => s + c.estimatedTokens, 0) || 1;
+    let acc = 0;
+    const stops: string[] = [];
+    const legendItems: string[] = [];
+    h.composition.forEach((c, i) => {
+      const frac = c.estimatedTokens / total;
+      const color = palette[i % palette.length];
+      const start = (acc * 360).toFixed(1);
+      acc += frac;
+      const end = (acc * 360).toFixed(1);
+      stops.push(color + ' ' + start + 'deg ' + end + 'deg');
+      legendItems.push(
+        '<div class="ch-leg"><span class="ch-swatch" style="background:' + color + ';"></span>' +
+        '<span class="ch-leglabel">' + catLabel(c.key) + '</span>' +
+        '<span class="ch-legval">' + Math.round(frac * 100) + '% · ' + num(c.estimatedTokens) + '</span></div>'
+      );
+    });
+    const donut =
+      '<div class="ch-donut-wrap">' +
+      '<div class="ch-donut" style="background: conic-gradient(' + stops.join(', ') + ');">' +
+      '<div class="ch-donut-hole"><span class="ch-donut-num">' + num(total) + '</span><span class="ch-donut-cap">' + p.estTokens + '</span></div>' +
+      '</div><div class="ch-legendcol">' + legendItems.join('') + '</div></div>';
+
+    const grid =
+      '<div class="ch-grid">' +
+      '<div class="ch-card"><h3>' + t.growth + '</h3>' + this.renderContextGrowthChart(h) + '</div>' +
+      '<div class="ch-card"><h3>' + t.composition + '</h3>' + donut + '</div>' +
+      '</div>';
+
+    // Per-topic timeline (token-weighted, chronological) — only when >1 topic.
+    let topicsBlock = '';
+    if (h.topics.length > 1) {
+      const tsorted = h.topics.slice().sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+      const ttotal = tsorted.reduce((s, x) => s + x.estimatedTokens, 0) || 1;
+      const segs = tsorted
+        .map((x, i) => {
+          const w = Math.max(2, (x.estimatedTokens / ttotal) * 100);
+          const lbl = x.label ? this.escapeHtml(x.label) : '—';
+          return '<div class="ch-tlseg" style="width:' + w.toFixed(1) + '%; background:' + palette[i % palette.length] + ';" title="' + lbl + ' — ' + num(x.estimatedTokens) + '"></div>';
+        })
+        .join('');
+      const tlegend = tsorted
+        .map((x, i) => {
+          const lbl = x.label ? this.escapeHtml(x.label) : '—';
+          return '<div class="ch-leg"><span class="ch-swatch" style="background:' + palette[i % palette.length] + ';"></span><span class="ch-leglabel">' + lbl + '</span><span class="ch-legval">' + num(x.estimatedTokens) + '</span></div>';
+        })
+        .join('');
+      topicsBlock =
+        '<div class="ch-card"><h3>' + t.topics + '</h3><div class="ch-timeline">' + segs + '</div><div class="ch-legendcol">' + tlegend + '</div></div>';
+    }
+
+    // Signal cards.
+    let signalsBlock = '';
+    if (h.signals.length > 0) {
+      const cards = h.signals
+        .map((s) => '<div class="ch-sig"><span class="ch-sigicon">⚠</span><span>' + this.escapeHtml(this.describeContextSignal(s)) + '</span></div>')
+        .join('');
+      signalsBlock = '<div class="ch-card"><h3>' + t.signalsTitle + '</h3><div class="ch-sigs">' + cards + '</div></div>';
+    }
+
+    let switchHint = '';
+    if (h.topicSwitchAt && h.topicSwitchGapMin) {
+      const at = new Date(h.topicSwitchAt);
+      const time = isNaN(at.getTime()) ? '' : this.formatDateTime(at);
+      switchHint = '<p class="table-hint">' + t.topicSwitch + ': ' + this.escapeHtml(time) + ' (' + h.topicSwitchGapMin + 'm)</p>';
+    }
+    const suggestion = h.status === 'healthy' ? t.suggestHealthy : t.suggestClear;
+    const suggestBlock = '<div class="ch-suggest ch-suggest-' + h.status + '">' + this.escapeHtml(suggestion) + '</div>';
+
+    return '<div class="ch">' + header + windowBlock + grid + topicsBlock + signalsBlock + switchHint + suggestBlock + '</div>';
+  }
+
+  /** Server-rendered SVG line chart of context-window growth over the session. */
+  private renderContextGrowthChart(h: ContextHealth): string {
+    const series = h.contextSeries || [];
+    if (series.length < 2) {
+      return '<p class="table-hint">—</p>';
+    }
+    const W = 560, H = 180, padL = 48, padR = 12, padT = 12, padB = 22;
+    const n = series.length;
+    const maxY = Math.max(h.contextLimit, ...series) || 1;
+    const xOf = (i: number): number => padL + (i / (n - 1)) * (W - padL - padR);
+    const yOf = (v: number): number => padT + (1 - v / maxY) * (H - padT - padB);
+    const color =
+      h.status === 'rot' ? 'var(--vscode-charts-red)' : h.status === 'watch' ? 'var(--vscode-charts-yellow)' : 'var(--vscode-charts-green)';
+
+    const coords = series.map((v, i) => xOf(i).toFixed(1) + ',' + yOf(v).toFixed(1));
+    const line = '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + coords.join(' ') + '" />';
+    const areaPts = xOf(0).toFixed(1) + ',' + yOf(0).toFixed(1) + ' ' + coords.join(' ') + ' ' + xOf(n - 1).toFixed(1) + ',' + yOf(0).toFixed(1);
+    const area = '<polygon fill="' + color + '" opacity="0.12" points="' + areaPts + '" />';
+
+    let gridlines = '';
+    [0, 0.25, 0.5, 0.75, 1].forEach((g) => {
+      const val = g * maxY;
+      const y = yOf(val).toFixed(1);
+      gridlines +=
+        '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="var(--vscode-panel-border)" stroke-width="1" opacity="0.4" />' +
+        '<text x="' + (padL - 6) + '" y="' + (yOf(val) + 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--vscode-descriptionForeground)">' + I18n.formatNumber(Math.round(val)) + '</text>';
+    });
+    const ly = yOf(h.contextLimit).toFixed(1);
+    const limitLine =
+      '<line x1="' + padL + '" y1="' + ly + '" x2="' + (W - padR) + '" y2="' + ly + '" stroke="var(--vscode-charts-red)" stroke-width="1" stroke-dasharray="4 3" opacity="0.7" />';
+
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet" role="img">' + gridlines + area + line + limitLine + '</svg>';
+  }
+
+  /** Localised, number-filled description of one context-rot signal. */
+  private describeContextSignal(s: ContextRotSignal): string {
+    const t = I18n.t.contextHealth;
+    switch (s.kind) {
+      case 'nearLimit':
+        return t.sigNearLimit + ' (' + s.value + '%)';
+      case 'largeToolResult':
+        return t.sigLargeToolResult + ': ' + (s.label || '') + ' (' + s.value + '%)';
+      case 'staleContext':
+        return t.sigStaleContext + ' (' + s.value + '%)';
+      case 'redundantReads':
+        return t.sigRedundantReads + ': ' + (s.label || '') + ' ×' + s.value;
+      case 'multiTopic':
+        return t.sigMultiTopic + ' (' + s.value + 'm)';
+      default:
+        return '';
+    }
+  }
+
   /**
    * Static stacked-bar chart breaking each period into input / cache-read /
    * cache-write / output tokens — a finer view than the single-metric chart.
@@ -2925,6 +3134,98 @@ export class UsageWebviewProvider {
       .topic-list li {
         margin-bottom: 4px;
       }
+
+      /* --- Context Health tab --- */
+      .ch { display: flex; flex-direction: column; gap: 16px; }
+      .ch-head { display: flex; align-items: center; gap: 12px; }
+      .ch-badge {
+        font-weight: 600;
+        font-size: 13px;
+        padding: 3px 12px;
+        border-radius: 12px;
+        color: var(--vscode-editor-background);
+      }
+      .ch-healthy .ch-badge { background: var(--vscode-charts-green); }
+      .ch-watch .ch-badge { background: var(--vscode-charts-yellow); }
+      .ch-rot .ch-badge { background: var(--vscode-charts-red); }
+      .ch-sub { color: var(--vscode-descriptionForeground); font-size: 12px; }
+      .ch-window { display: flex; flex-direction: column; gap: 6px; }
+      .ch-winrow { display: flex; justify-content: space-between; font-size: 13px; }
+      .ch-winrow.ch-muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
+      .ch-fill {
+        height: 12px;
+        border-radius: 6px;
+        background: var(--vscode-input-background);
+        border: 1px solid var(--vscode-input-border);
+        overflow: hidden;
+      }
+      .ch-fillbar { height: 100%; border-radius: 6px; transition: width 0.3s ease; }
+      .ch-fill-healthy { background: var(--vscode-charts-green); }
+      .ch-fill-watch { background: var(--vscode-charts-yellow); }
+      .ch-fill-rot { background: var(--vscode-charts-red); }
+      .ch-pace { font-size: 12px; color: var(--vscode-descriptionForeground); }
+      .ch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      @media (max-width: 720px) { .ch-grid { grid-template-columns: 1fr; } }
+      .ch-card {
+        background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 8px;
+        padding: 12px 14px;
+      }
+      .ch-card h3 { margin: 0 0 10px; font-size: 13px; }
+      .ch-donut-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+      .ch-donut {
+        position: relative;
+        width: 132px;
+        height: 132px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .ch-donut-hole {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        width: 82px; height: 82px;
+        border-radius: 50%;
+        background: var(--vscode-editor-background);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+      }
+      .ch-donut-num { font-size: 15px; font-weight: 600; }
+      .ch-donut-cap { font-size: 10px; color: var(--vscode-descriptionForeground); }
+      .ch-legendcol { display: flex; flex-direction: column; gap: 4px; min-width: 160px; flex: 1; }
+      .ch-leg { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      .ch-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+      .ch-leglabel { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ch-legval { color: var(--vscode-descriptionForeground); }
+      .ch-timeline {
+        display: flex;
+        height: 26px;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid var(--vscode-input-border);
+        margin-bottom: 10px;
+      }
+      .ch-tlseg { height: 100%; }
+      .ch-sigs { display: flex; flex-direction: column; gap: 8px; }
+      .ch-sig {
+        display: flex; align-items: flex-start; gap: 8px;
+        font-size: 12px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--vscode-input-background);
+        border-left: 3px solid var(--vscode-charts-yellow);
+      }
+      .ch-sigicon { flex-shrink: 0; }
+      .ch-suggest {
+        font-size: 13px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        background: var(--vscode-input-background);
+        border-left: 4px solid var(--vscode-charts-green);
+      }
+      .ch-suggest-watch { border-left-color: var(--vscode-charts-yellow); }
+      .ch-suggest-rot { border-left-color: var(--vscode-charts-red); }
     `;
   }
 
