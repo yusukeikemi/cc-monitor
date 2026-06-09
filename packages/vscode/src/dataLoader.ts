@@ -773,15 +773,24 @@ export class ClaudeDataLoader {
    * filling it, and whether it shows signs of "context rot". Returns null when
    * there is no active session or its file can't be read.
    */
-  static async getContextHealth(records: ClaudeUsageRecord[], dataDirectory: string): Promise<ContextHealth | null> {
+  static async getContextHealth(
+    records: ClaudeUsageRecord[],
+    dataDirectory: string,
+    sessionId?: string
+  ): Promise<ContextHealth | null> {
     if (!records || records.length === 0) {
       return null;
     }
 
-    // Active session = the one holding the most recent record.
+    // Target a specific session when asked (Sessions-tab drill-down); otherwise
+    // the active session = the one holding the most recent record.
+    const pool = sessionId ? records.filter((r) => r._sessionId === sessionId) : records;
+    if (pool.length === 0) {
+      return null;
+    }
     let latest: ClaudeUsageRecord | null = null;
     let latestMs = -Infinity;
-    for (const r of records) {
+    for (const r of pool) {
       const ms = new Date(r.timestamp).getTime();
       if (!isNaN(ms) && ms > latestMs) {
         latestMs = ms;

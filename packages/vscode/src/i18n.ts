@@ -19,6 +19,9 @@ export interface Translations {
     topics: string;
     signalsTitle: string;
     peak: string;
+    inspect: string;
+    viewing: string;
+    backToActive: string;
     notifyRot: string;
     statusHealthy: string;
     statusWatch: string;
@@ -175,6 +178,9 @@ const translations: Record<SupportedLanguage, Translations> = {
       topics: 'Topics',
       signalsTitle: 'Signals',
       peak: 'Peak',
+      inspect: 'Inspect',
+      viewing: 'Viewing session',
+      backToActive: 'Back to active',
       notifyRot: 'Context is getting bloated — consider /clear to start a fresh topic.',
       statusHealthy: 'Healthy',
       statusWatch: 'Getting heavy',
@@ -327,6 +333,9 @@ const translations: Record<SupportedLanguage, Translations> = {
       topics: "Themen",
       signalsTitle: "Signale",
       peak: "Spitze",
+      inspect: "Prüfen",
+      viewing: "Sitzung",
+      backToActive: "Zur aktiven",
       notifyRot: "Der Kontext wird überladen — mit /clear ein neues Thema beginnen.",
       statusHealthy: "Gesund",
       statusWatch: "Wird voll",
@@ -481,6 +490,9 @@ const translations: Record<SupportedLanguage, Translations> = {
       topics: '話題',
       signalsTitle: '訊號',
       peak: '峰值',
+      inspect: '深入查看',
+      viewing: '檢視工作階段',
+      backToActive: '返回當前',
       notifyRot: '上下文正在臃腫 — 建議使用 /clear 開始新話題。',
       statusHealthy: '健康',
       statusWatch: '漸趨臃腫',
@@ -633,6 +645,9 @@ const translations: Record<SupportedLanguage, Translations> = {
       topics: '话题',
       signalsTitle: '信号',
       peak: '峰值',
+      inspect: '深入查看',
+      viewing: '查看会话',
+      backToActive: '返回当前',
       notifyRot: '上下文正在臃肿 — 建议使用 /clear 开始新话题。',
       statusHealthy: '健康',
       statusWatch: '渐趋臃肿',
@@ -785,6 +800,9 @@ const translations: Record<SupportedLanguage, Translations> = {
       topics: '話題',
       signalsTitle: '検知信号',
       peak: 'ピーク',
+      inspect: '深掘り',
+      viewing: '表示中のセッション',
+      backToActive: '現在に戻る',
       notifyRot: 'コンテキストが肥大化しています — /clear で新しい話題を始めると効果的です。',
       statusHealthy: '良好',
       statusWatch: 'やや過多',
@@ -937,6 +955,9 @@ const translations: Record<SupportedLanguage, Translations> = {
       topics: '주제',
       signalsTitle: '시그널',
       peak: '최대',
+      inspect: '자세히',
+      viewing: '세션 보기',
+      backToActive: '현재로',
       notifyRot: '컨텍스트가 비대해지고 있습니다 — /clear로 새 주제를 시작하세요.',
       statusHealthy: '양호',
       statusWatch: '점점 과다',

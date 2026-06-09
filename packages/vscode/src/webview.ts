@@ -25,7 +25,14 @@ export class UsageWebviewProvider {
   private branchBreakdown: BranchUsage[] = [];
   private activityAnalysis: ActivityAnalysis | null = null;
   private quotaHistory: QuotaSnapshot[] = [];
-  private contextHealth: ContextHealth | null = null;
+  // Context Health for the live/active session (refreshed automatically).
+  private activeContextHealth: ContextHealth | null = null;
+  // A specific session pinned via the Sessions-tab drill-down; overrides the
+  // active session in the Context Health tab until cleared. null = follow active.
+  private inspectedContextHealth: ContextHealth | null = null;
+  private get contextHealth(): ContextHealth | null {
+    return this.inspectedContextHealth ?? this.activeContextHealth;
+  }
   // True once the dashboard shell (document + script) is live in the panel, so
   // subsequent refreshes can swap just the inner content instead of reloading
   // the whole document (which flashed the panel blank on every refresh).
@@ -65,6 +72,23 @@ export class UsageWebviewProvider {
           break;
         case 'tabChanged':
           this.currentTab = message.tab;
+          break;
+        case 'inspectContextHealth': {
+          const sessionId = message.sessionId;
+          if (sessionId && this.dataDirectory) {
+            const { ClaudeDataLoader } = await import('./dataLoader');
+            const health = await ClaudeDataLoader.getContextHealth(this.allRecords, this.dataDirectory, sessionId);
+            if (health) {
+              this.inspectedContextHealth = health;
+              this.currentTab = 'contextHealth';
+              this.updateWebview();
+            }
+          }
+          break;
+        }
+        case 'clearInspectContextHealth':
+          this.inspectedContextHealth = null;
+          this.updateWebview();
           break;
         case 'getHourlyData':
           const dateString = message.date;
@@ -140,7 +164,7 @@ export class UsageWebviewProvider {
     this.branchBreakdown = branchBreakdown;
     this.activityAnalysis = activityAnalysis;
     this.quotaHistory = quotaHistory;
-    this.contextHealth = contextHealth;
+    this.activeContextHealth = contextHealth;
 
     if (this.panel) {
       this.updateWebview();
@@ -1016,6 +1040,9 @@ export class UsageWebviewProvider {
         '<td class="number-cell">' + I18n.formatNumber(s.peakContextTokens) + '</td>' +
         '<td class="number-cell">' + I18n.formatNumber(d.messageCount) + '</td>' +
         '<td class="number-cell">' + this.escapeHtml(this.formatDuration(s.startTime, s.endTime)) + '</td>' +
+        '<td class="number-cell"><button class="ch-inspect-btn" data-session="' + this.escapeHtml(s.sessionId) +
+        '" onclick="inspectContextHealth(this.dataset.session)" title="' + I18n.t.contextHealth.inspect + '">🔍 ' +
+        I18n.t.contextHealth.inspect + '</button></td>' +
         '</tr>';
     });
 
@@ -1039,6 +1066,7 @@ export class UsageWebviewProvider {
       th('context', t.peakContext) +
       th('messages', t.messages) +
       th('duration', t.duration) +
+      '<th></th>' +
       '</tr></thead>' +
       '<tbody>' + rows + '</tbody>' +
       '</table>' +
@@ -1810,6 +1838,14 @@ export class UsageWebviewProvider {
       }
     };
 
+    // Drill-down banner (when a specific session is pinned from the Sessions tab).
+    let inspectBanner = '';
+    if (this.inspectedContextHealth) {
+      inspectBanner =
+        '<div class="ch-inspecting"><span>' + t.viewing + ': ' + this.escapeHtml(h.sessionId) + '</span>' +
+        '<button class="ch-back-btn" onclick="backToActiveContextHealth()">' + t.backToActive + '</button></div>';
+    }
+
     // Header + window-fill bar.
     const header =
       '<div class="ch-head ch-' + h.status + '">' +
@@ -1902,7 +1938,7 @@ export class UsageWebviewProvider {
     const suggestion = h.status === 'healthy' ? t.suggestHealthy : t.suggestClear;
     const suggestBlock = '<div class="ch-suggest ch-suggest-' + h.status + '">' + this.escapeHtml(suggestion) + '</div>';
 
-    return '<div class="ch">' + header + windowBlock + grid + topicsBlock + signalsBlock + switchHint + suggestBlock + '</div>';
+    return '<div class="ch">' + inspectBanner + header + windowBlock + grid + topicsBlock + signalsBlock + switchHint + suggestBlock + '</div>';
   }
 
   /** Server-rendered SVG line chart of context-window growth over the session. */
@@ -3226,6 +3262,42 @@ export class UsageWebviewProvider {
       }
       .ch-suggest-watch { border-left-color: var(--vscode-charts-yellow); }
       .ch-suggest-rot { border-left-color: var(--vscode-charts-red); }
+      .ch-inspect-btn {
+        background: transparent;
+        border: 1px solid var(--vscode-button-border, var(--vscode-input-border));
+        color: var(--vscode-foreground);
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .ch-inspect-btn:hover {
+        background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+      }
+      .ch-inspecting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        background: var(--vscode-input-background);
+        border: 1px solid var(--vscode-panel-border);
+        font-size: 12px;
+        color: var(--vscode-descriptionForeground);
+      }
+      .ch-back-btn {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border: none;
+        border-radius: 4px;
+        padding: 3px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .ch-back-btn:hover { background: var(--vscode-button-hoverBackground); }
     `;
   }
 
@@ -3257,6 +3329,14 @@ function refresh() {
 function openSettings() {
   console.log("[DEBUG] openSettings called");
   vscode.postMessage({ command: 'openSettings' });
+}
+
+function inspectContextHealth(sessionId) {
+  vscode.postMessage({ command: 'inspectContextHealth', sessionId: sessionId });
+}
+
+function backToActiveContextHealth() {
+  vscode.postMessage({ command: 'clearInspectContextHealth' });
 }
 
 function toggleProjectGroup(groupId) {
