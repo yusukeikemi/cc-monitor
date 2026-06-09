@@ -113,7 +113,15 @@ export interface ContentAnalysis {
 // One heuristic "context rot" signal detected in the active session. All signals
 // are computed offline from the conversation log — no LLM judgement is involved.
 export interface ContextRotSignal {
-  kind: 'nearLimit' | 'largeToolResult' | 'staleContext' | 'redundantReads' | 'multiTopic';
+  kind:
+    | 'nearLimit'
+    | 'largeToolResult'
+    | 'staleContext'
+    | 'redundantReads'
+    | 'multiTopic'
+    | 'cacheBust'
+    | 'largeBaseline'
+    | 'fullFileReads';
   // Contextual numbers for the renderer (a percentage, a count, or minutes,
   // depending on `kind`).
   value?: number;
@@ -137,6 +145,25 @@ export interface ContextHealth {
   // Largest tool-result contributors (top few).
   topToolResults: ContentSlice[];
   signals: ContextRotSignal[];
+  // --- Token-efficiency metrics (session-level, computed offline from the
+  // usage fields and tool blocks; no LLM judgement involved). ---
+  // Share of input-side tokens served cheaply from cache across the session:
+  // Σcache_read / Σ(cache_read + cache_creation + input). 0-100.
+  cacheHitRate: number;
+  // Prefix-break events where an already-cached prefix had to be re-written
+  // (e.g. a mid-session model switch or system/tool churn), and the tokens / $
+  // those costly re-writes wasted versus keeping the cache warm.
+  cacheBustCount: number;
+  cacheWastedTokens: number;
+  cacheWastedUSD: number;
+  // Per-session startup baseline (system prompt + tool schemas + CLAUDE.md),
+  // approximated by the first request's written/processed prefix. A large
+  // baseline is paid on every session regardless of the work.
+  baselineTokens: number;
+  // Tokens reclaimable by truncating oversized individual tool results to a cap.
+  reclaimableTokens: number;
+  // Read tool calls that dumped a whole file (no offset/limit line range).
+  fullFileReads: number;
   status: 'healthy' | 'watch' | 'rot';
   // Down-sampled context-window sizes over the session, oldest→newest (sparkline).
   contextSeries: number[];

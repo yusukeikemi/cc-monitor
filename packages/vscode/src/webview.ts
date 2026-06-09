@@ -1898,6 +1898,43 @@ export class UsageWebviewProvider {
       '<div class="ch-card"><h3>' + t.composition + '</h3>' + donut + '</div>' +
       '</div>';
 
+    // Token-efficiency card: cache health + cache-bust waste, startup baseline,
+    // and reclaimable tool output (all computed offline from the transcript).
+    const fmtUsd = (n: number): string => '$' + n.toFixed(n >= 1 ? 2 : 3);
+    const hitPct = Math.round(h.cacheHitRate);
+    const hitCls = hitPct >= 50 ? 'cache-badge-good' : hitPct >= 20 ? 'cache-badge-mid' : 'cache-badge-low';
+    const effRows: string[] = [];
+    effRows.push(
+      '<div class="ch-winrow"><span>' + p.cacheHitRate + '</span>' +
+      '<span class="cache-badge ' + hitCls + '">' + hitPct + '%</span></div>'
+    );
+    if (h.cacheBustCount > 0) {
+      effRows.push(
+        '<div class="ch-winrow"><span>' + t.cacheWaste + '</span>' +
+        '<span>' + num(h.cacheWastedTokens) + ' · ' + fmtUsd(h.cacheWastedUSD) + '</span></div>' +
+        '<div class="ch-rec">' + this.escapeHtml(t.recCacheBust) + '</div>'
+      );
+    }
+    effRows.push(
+      '<div class="ch-winrow ch-muted"><span>' + t.baseline + '</span><span>' + num(h.baselineTokens) + '</span></div>'
+    );
+    if (h.baselineTokens >= 25000) {
+      effRows.push('<div class="ch-rec">' + this.escapeHtml(t.recBaseline) + '</div>');
+    }
+    if (h.reclaimableTokens > 0) {
+      effRows.push(
+        '<div class="ch-winrow"><span>' + t.reclaimable + '</span><span>' + num(h.reclaimableTokens) + '</span></div>' +
+        '<div class="ch-rec">' + this.escapeHtml(t.recReclaim) + '</div>'
+      );
+    }
+    if (h.fullFileReads > 0) {
+      effRows.push(
+        '<div class="ch-winrow ch-muted"><span>' + t.fullFileReadsLabel + '</span><span>×' + h.fullFileReads + '</span></div>'
+      );
+    }
+    const efficiencyBlock =
+      '<div class="ch-card"><h3>' + t.efficiency + '</h3><div class="ch-window">' + effRows.join('') + '</div></div>';
+
     // Per-topic timeline (token-weighted, chronological) — only when >1 topic.
     let topicsBlock = '';
     if (h.topics.length > 1) {
@@ -1938,7 +1975,7 @@ export class UsageWebviewProvider {
     const suggestion = h.status === 'healthy' ? t.suggestHealthy : t.suggestClear;
     const suggestBlock = '<div class="ch-suggest ch-suggest-' + h.status + '">' + this.escapeHtml(suggestion) + '</div>';
 
-    return '<div class="ch">' + inspectBanner + header + windowBlock + grid + topicsBlock + signalsBlock + switchHint + suggestBlock + '</div>';
+    return '<div class="ch">' + inspectBanner + header + windowBlock + grid + efficiencyBlock + topicsBlock + signalsBlock + switchHint + suggestBlock + '</div>';
   }
 
   /** Server-rendered SVG line chart of context-window growth over the session. */
@@ -1989,6 +2026,12 @@ export class UsageWebviewProvider {
         return t.sigRedundantReads + ': ' + (s.label || '') + ' ×' + s.value;
       case 'multiTopic':
         return t.sigMultiTopic + ' (' + s.value + 'm)';
+      case 'cacheBust':
+        return t.sigCacheBust + ' (×' + s.value + ')';
+      case 'largeBaseline':
+        return t.sigLargeBaseline + ' (~' + s.value + 'k)';
+      case 'fullFileReads':
+        return t.sigFullFileReads + ' (×' + s.value + ')';
       default:
         return '';
     }
@@ -3188,6 +3231,7 @@ export class UsageWebviewProvider {
       .ch-window { display: flex; flex-direction: column; gap: 6px; }
       .ch-winrow { display: flex; justify-content: space-between; font-size: 13px; }
       .ch-winrow.ch-muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
+      .ch-rec { font-size: 11px; color: var(--vscode-descriptionForeground); margin: 2px 0 6px; opacity: 0.9; }
       .ch-fill {
         height: 12px;
         border-radius: 6px;

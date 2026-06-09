@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 // Removed tinyglobby dependency - using native fs instead
 // Removed zod dependency - using native validation instead
-import { calculateCostBreakdown, getModelContextLimit } from './pricing';
+import { calculateCostBreakdown, getModelContextLimit, getModelPricing } from './pricing';
 import {
   ActivityAnalysis,
   BranchUsage,
@@ -816,6 +816,11 @@ export class ClaudeDataLoader {
     let model = latest.message.model || '';
     let lastAssistantMs = -Infinity;
     const readCounts: Record<string, number> = {};
+    // Per-assistant-turn cache usage (time-ordered) for cache-bust detection.
+    const turns: { ts: number; read: number; create: number; input: number; model: string }[] = [];
+    let sumRead = 0, sumCreate = 0, sumInput = 0; // session totals for the cache hit rate
+    const toolResultSizes: number[] = []; // estimated tokens of each individual tool_result
+    let fullFileReads = 0; // Read calls with no offset/limit (whole-file dumps)
     const ctxSeries: { ts: number; ctx: number }[] = []; // context size per assistant turn
     const lineEst: { ts: number; est: number }[] = []; // per-message token estimate (any role)
     const promptTexts: { ts: number; text: string }[] = []; // real user prompts (for topics)
@@ -848,11 +853,31 @@ export class ClaudeDataLoader {
         }
       }
 
+      // Size each individual tool_result (for reclaimable-output detection).
+      if (Array.isArray(message.content)) {
+        for (const block of message.content) {
+          if (block && block.type === 'tool_result') {
+            const sz = estimateTokens(blockText(block.content));
+            if (sz > 0) {
+              toolResultSizes.push(sz);
+            }
+          }
+        }
+      }
+
       if (role === 'assistant' && message.usage) {
         const ctx = this.recordContextTokens({ message } as ClaudeUsageRecord);
         peakContextTokens = Math.max(peakContextTokens, ctx);
+        const u = message.usage;
+        const read = u.cache_read_input_tokens || 0;
+        const create = u.cache_creation_input_tokens || 0;
+        const inp = u.input_tokens || 0;
+        sumRead += read;
+        sumCreate += create;
+        sumInput += inp;
         if (!isNaN(tsMs)) {
           ctxSeries.push({ ts: tsMs, ctx });
+          turns.push({ ts: tsMs, read, create, input: inp, model: typeof message.model === 'string' ? message.model : model });
         }
         if (!isNaN(tsMs) && tsMs >= lastAssistantMs) {
           lastAssistantMs = tsMs;
@@ -865,9 +890,14 @@ export class ClaudeDataLoader {
         if (Array.isArray(message.content)) {
           for (const block of message.content) {
             if (block && block.type === 'tool_use' && block.name === 'Read') {
-              const fp = block.input && typeof block.input.file_path === 'string' ? block.input.file_path : '';
+              const inp2 = block.input && typeof block.input === 'object' ? block.input : {};
+              const fp = typeof inp2.file_path === 'string' ? inp2.file_path : '';
               if (fp) {
                 readCounts[fp] = (readCounts[fp] || 0) + 1;
+              }
+              // A Read with neither offset nor limit dumps the entire file.
+              if (inp2.offset == null && inp2.limit == null) {
+                fullFileReads++;
               }
             }
           }
@@ -1009,6 +1039,57 @@ export class ClaudeDataLoader {
       }
     }
 
+    // --- Token-efficiency metrics (offline, from usage fields + tool blocks) ---
+    // Cache hit rate: share of input-side tokens served cheaply from cache.
+    const cacheInputSide = sumRead + sumCreate + sumInput;
+    const cacheHitRate = cacheInputSide > 0 ? (sumRead / cacheInputSide) * 100 : 0;
+
+    // Cache-bust detection: a turn that re-writes a large prefix which the
+    // previous turn already had cached (read collapses while creation spikes) —
+    // e.g. a mid-session model switch or system/tool churn. Those re-writes pay
+    // the 1.25x write rate instead of the 0.1x read rate.
+    const CACHE_PREFIX_MIN = 4096;
+    turns.sort((a, b) => a.ts - b.ts);
+    let cacheBustCount = 0;
+    let cacheWastedTokens = 0;
+    for (let i = 1; i < turns.length; i++) {
+      const prev = turns[i - 1];
+      const cur = turns[i];
+      const prevCached = prev.read + prev.create;
+      if (prevCached >= CACHE_PREFIX_MIN && cur.read < prevCached * 0.5 && cur.create >= CACHE_PREFIX_MIN) {
+        cacheBustCount++;
+        cacheWastedTokens += cur.create;
+      }
+    }
+    const pricing = getModelPricing(model);
+    const cacheWastedUSD = pricing
+      ? Math.max(0, cacheWastedTokens * ((pricing.cache_creation_input_token_cost || 0) - (pricing.cache_read_input_token_cost || 0)))
+      : 0;
+
+    // Startup baseline: the first request's written/processed prefix (system
+    // prompt + tool schemas + CLAUDE.md), present every session regardless of work.
+    const firstTurn = turns.length > 0 ? turns[0] : null;
+    const baselineTokens = firstTurn ? (firstTurn.create > 0 ? firstTurn.create : firstTurn.input) : 0;
+
+    // Reclaimable tool output: tokens in oversized individual results beyond a cap.
+    const TOOL_RESULT_CAP = 8000;
+    let reclaimableTokens = 0;
+    for (const sz of toolResultSizes) {
+      if (sz > TOOL_RESULT_CAP) {
+        reclaimableTokens += sz - TOOL_RESULT_CAP;
+      }
+    }
+
+    if (cacheWastedTokens >= 20000) {
+      signals.push({ kind: 'cacheBust', value: cacheBustCount });
+    }
+    if (baselineTokens >= 25000) {
+      signals.push({ kind: 'largeBaseline', value: Math.round(baselineTokens / 1000) });
+    }
+    if (fullFileReads >= 5) {
+      signals.push({ kind: 'fullFileReads', value: fullFileReads });
+    }
+
     // --- Overall status ---
     const hasLarge = signals.some((s) => s.kind === 'largeToolResult');
     const hasMulti = signals.some((s) => s.kind === 'multiTopic');
@@ -1030,6 +1111,13 @@ export class ClaudeDataLoader {
       composition,
       topToolResults,
       signals,
+      cacheHitRate,
+      cacheBustCount,
+      cacheWastedTokens,
+      cacheWastedUSD,
+      baselineTokens,
+      reclaimableTokens,
+      fullFileReads,
       status,
       contextSeries,
       growthTokensPerMin,
