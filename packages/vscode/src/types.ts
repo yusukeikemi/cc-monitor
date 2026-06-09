@@ -109,6 +109,40 @@ export interface ContentAnalysis {
   recentPrompts: { cwd: string; text: string }[];
 }
 
+// --- Context Health (the live status-bar indicator) ---
+// One heuristic "context rot" signal detected in the active session. All signals
+// are computed offline from the conversation log — no LLM judgement is involved.
+export interface ContextRotSignal {
+  kind: 'nearLimit' | 'largeToolResult' | 'staleContext' | 'redundantReads' | 'multiTopic';
+  // Contextual numbers for the renderer (a percentage, a count, or minutes,
+  // depending on `kind`).
+  value?: number;
+  // Contextual label for the renderer (e.g. a tool name or file name).
+  label?: string;
+}
+
+// Live health of the currently-active session's context window. Estimated
+// offline from the single .jsonl of the most recently updated session.
+export interface ContextHealth {
+  sessionId: string;
+  projectName: string;
+  model: string;
+  contextTokens: number; // current window size (input + cache read + cache write of the latest request)
+  peakContextTokens: number;
+  contextLimit: number; // approximate model context-window size
+  fillRatio: number; // contextTokens / contextLimit (0-1)
+  // Estimated composition of what fills the window (userPrompts, assistantText,
+  // assistantThinking, toolCalls, toolResults), sorted by token share.
+  composition: ContentSlice[];
+  // Largest tool-result contributors (top few).
+  topToolResults: ContentSlice[];
+  signals: ContextRotSignal[];
+  status: 'healthy' | 'watch' | 'rot';
+  // Largest gap between consecutive user prompts — a candidate topic-switch point.
+  topicSwitchAt?: string; // ISO timestamp
+  topicSwitchGapMin?: number;
+}
+
 // --- Activity analysis (the "Activity" tab) ---
 // All figures cover the same recent window as the content analysis (last 30
 // days) and are exact counts derived from the raw log — not token estimates.
@@ -189,6 +223,9 @@ export interface ExtensionConfig {
   // Run the (CPU-heavy) content/prompt-token analysis. When false the Content
   // tab is hidden and the analysis is skipped during refresh.
   enableContentAnalysis: boolean;
+  // Show the live Context Health indicator in the status bar. When false the
+  // indicator is hidden and its (per-session) analysis is skipped during refresh.
+  enableContextHealth: boolean;
   // How the Projects tab groups working directories:
   //   - 'git'    group by enclosing git repository (default; current behaviour)
   //   - 'folder' group by the heuristic top-level project folder only

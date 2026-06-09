@@ -8,6 +8,22 @@ export interface Translations {
     error: string;
     currentSession: string;
   };
+  contextHealth: {
+    title: string;
+    windowSize: string;
+    composition: string;
+    topicSwitch: string;
+    statusHealthy: string;
+    statusWatch: string;
+    statusRot: string;
+    sigNearLimit: string;
+    sigLargeToolResult: string;
+    sigStaleContext: string;
+    sigRedundantReads: string;
+    sigMultiTopic: string;
+    suggestClear: string;
+    suggestHealthy: string;
+  };
   popup: {
     title: string;
     currentSession: string;
@@ -141,6 +157,22 @@ const translations: Record<SupportedLanguage, Translations> = {
       error: 'Error',
       currentSession: 'Session',
     },
+    contextHealth: {
+      title: 'Context Health',
+      windowSize: 'Window',
+      composition: "What's in context",
+      topicSwitch: 'Topic-switch point',
+      statusHealthy: 'Healthy',
+      statusWatch: 'Getting heavy',
+      statusRot: 'Bloated',
+      sigNearLimit: 'Context near the model limit',
+      sigLargeToolResult: 'A large tool result dominates the context',
+      sigStaleContext: 'Mostly carried-over old content',
+      sigRedundantReads: 'Same file re-read repeatedly',
+      sigMultiTopic: 'Multiple topics in one session',
+      suggestClear: 'Consider /clear to start a fresh topic.',
+      suggestHealthy: 'Context looks healthy.',
+    },
     popup: {
       title: 'Claude Code Usage',
       currentSession: 'Current Session',
@@ -269,6 +301,22 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: "Claude Code nicht erreichbar",
       error: "Error",
       currentSession: "Session",
+    },
+    contextHealth: {
+      title: "Kontext-Zustand",
+      windowSize: "Fenster",
+      composition: "Was im Kontext ist",
+      topicSwitch: "Themenwechsel-Punkt",
+      statusHealthy: "Gesund",
+      statusWatch: "Wird voll",
+      statusRot: "Überladen",
+      sigNearLimit: "Kontext nahe am Modell-Limit",
+      sigLargeToolResult: "Ein großes Tool-Ergebnis dominiert den Kontext",
+      sigStaleContext: "Überwiegend übernommener alter Inhalt",
+      sigRedundantReads: "Dieselbe Datei mehrfach gelesen",
+      sigMultiTopic: "Mehrere Themen in einer Sitzung",
+      suggestClear: "Mit /clear ein neues Thema beginnen.",
+      suggestHealthy: "Kontext sieht gesund aus.",
     },
     popup: {
       title: "Claude Code Nutzung",
@@ -401,6 +449,22 @@ const translations: Record<SupportedLanguage, Translations> = {
       error: '錯誤',
       currentSession: '當前會話',
     },
+    contextHealth: {
+      title: '上下文健康度',
+      windowSize: '視窗',
+      composition: '上下文內容',
+      topicSwitch: '話題切換點',
+      statusHealthy: '健康',
+      statusWatch: '漸趨臃腫',
+      statusRot: '臃腫',
+      sigNearLimit: '上下文接近模型上限',
+      sigLargeToolResult: '單一工具結果佔據大量上下文',
+      sigStaleContext: '多為延續的舊內容',
+      sigRedundantReads: '同一檔案重複讀取',
+      sigMultiTopic: '單一工作階段中有多個話題',
+      suggestClear: '建議使用 /clear 開始新話題。',
+      suggestHealthy: '上下文狀態良好。',
+    },
     popup: {
       title: 'Claude Code 使用量',
       currentSession: '當前會話',
@@ -529,6 +593,22 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 未运行',
       error: '错误',
       currentSession: '当前会话',
+    },
+    contextHealth: {
+      title: '上下文健康度',
+      windowSize: '窗口',
+      composition: '上下文内容',
+      topicSwitch: '话题切换点',
+      statusHealthy: '健康',
+      statusWatch: '渐趋臃肿',
+      statusRot: '臃肿',
+      sigNearLimit: '上下文接近模型上限',
+      sigLargeToolResult: '单个工具结果占据大量上下文',
+      sigStaleContext: '多为延续的旧内容',
+      sigRedundantReads: '同一文件重复读取',
+      sigMultiTopic: '单个会话中有多个话题',
+      suggestClear: '建议使用 /clear 开始新话题。',
+      suggestHealthy: '上下文状态良好。',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -659,6 +739,22 @@ const translations: Record<SupportedLanguage, Translations> = {
       error: 'エラー',
       currentSession: '現在のセッション',
     },
+    contextHealth: {
+      title: 'コンテキスト健全度',
+      windowSize: 'ウィンドウ',
+      composition: 'コンテキストの中身',
+      topicSwitch: '話題の切り替え目安',
+      statusHealthy: '良好',
+      statusWatch: 'やや過多',
+      statusRot: '肥大化',
+      sigNearLimit: 'コンテキストがモデル上限に接近',
+      sigLargeToolResult: '大きなツール結果がコンテキストを占有',
+      sigStaleContext: '古い引き継ぎ内容が大半',
+      sigRedundantReads: '同じファイルを繰り返し読み込み',
+      sigMultiTopic: '1セッションに複数の話題',
+      suggestClear: '/clear で新しい話題を始めると効果的です。',
+      suggestHealthy: 'コンテキストは良好です。',
+    },
     popup: {
       title: 'Claude Code 使用量',
       currentSession: '現在のセッション',
@@ -787,6 +883,22 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 실행되지 않음',
       error: '오류',
       currentSession: '현재 세션',
+    },
+    contextHealth: {
+      title: '컨텍스트 상태',
+      windowSize: '윈도우',
+      composition: '컨텍스트 구성',
+      topicSwitch: '주제 전환 지점',
+      statusHealthy: '양호',
+      statusWatch: '점점 과다',
+      statusRot: '비대',
+      sigNearLimit: '컨텍스트가 모델 한도에 근접',
+      sigLargeToolResult: '큰 도구 결과가 컨텍스트를 점유',
+      sigStaleContext: '대부분 이어받은 오래된 내용',
+      sigRedundantReads: '같은 파일을 반복해서 읽음',
+      sigMultiTopic: '한 세션에 여러 주제',
+      suggestClear: '/clear로 새 주제를 시작하는 것이 좋습니다.',
+      suggestHealthy: '컨텍스트 상태가 양호합니다.',
     },
     popup: {
       title: 'Claude Code 사용량',

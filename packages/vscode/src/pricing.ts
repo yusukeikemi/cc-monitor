@@ -333,6 +333,32 @@ export function calculateCostBreakdown(
 }
 
 /**
+ * Approximate context-window size (in tokens) for a model. Used by the Context
+ * Health indicator to estimate how full the window is. These are the standard
+ * published limits — the actual usable window can differ (e.g. 1M-token beta
+ * tiers), so treat the resulting fill ratio as an estimate.
+ */
+export function getModelContextLimit(modelName: string | undefined): number {
+  const DEFAULT = 200_000;
+  if (!modelName) {
+    return DEFAULT;
+  }
+  const name = modelName.toLowerCase();
+  // Claude (Opus / Sonnet / Haiku) — 200K standard window.
+  if (name.includes('claude') || name.includes('opus') || name.includes('sonnet') || name.includes('haiku')) {
+    return 200_000;
+  }
+  // Other providers Claude Code can be pointed at (rough published limits).
+  if (name.includes('gpt') || /(^|[^a-z])o[1-9]([^a-z]|$)/.test(name)) {
+    return 400_000; // GPT-5 class
+  }
+  if (name.includes('gemini')) {
+    return 1_000_000;
+  }
+  return DEFAULT;
+}
+
+/**
  * Per-million-token rates for a model, intended for display in the UI so users
  * can sanity-check the figures behind a cost.
  * @returns rates in USD per 1M tokens, or null if the model is unknown

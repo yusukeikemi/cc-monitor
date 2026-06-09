@@ -4,13 +4,15 @@ import * as os from 'os';
 import * as path from 'path';
 // Removed tinyglobby dependency - using native fs instead
 // Removed zod dependency - using native validation instead
-import { calculateCostBreakdown } from './pricing';
+import { calculateCostBreakdown, getModelContextLimit } from './pricing';
 import {
   ActivityAnalysis,
   BranchUsage,
   ClaudeUsageRecord,
   ContentAnalysis,
   ContentSlice,
+  ContextHealth,
+  ContextRotSignal,
   ProjectGroup,
   ProjectUsage,
   SessionData,
@@ -734,6 +736,201 @@ export class ClaudeDataLoader {
   private static recordContextTokens(record: ClaudeUsageRecord): number {
     const usage = record.message.usage;
     return (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+  }
+
+  /**
+   * Live "Context Health" for the currently-active session (the conversation
+   * holding the most recent record). Re-reads that single .jsonl and derives,
+   * with offline heuristics only, how full the context window is, what is
+   * filling it, and whether it shows signs of "context rot". Returns null when
+   * there is no active session or its file can't be read.
+   */
+  static async getContextHealth(records: ClaudeUsageRecord[], dataDirectory: string): Promise<ContextHealth | null> {
+    if (!records || records.length === 0) {
+      return null;
+    }
+
+    // Active session = the one holding the most recent record.
+    let latest: ClaudeUsageRecord | null = null;
+    let latestMs = -Infinity;
+    for (const r of records) {
+      const ms = new Date(r.timestamp).getTime();
+      if (!isNaN(ms) && ms > latestMs) {
+        latestMs = ms;
+        latest = r;
+      }
+    }
+    if (!latest || !latest._sessionId || !latest._projectPath) {
+      return null;
+    }
+
+    const filePath = path.join(dataDirectory, CLAUDE_PROJECTS_DIR_NAME, latest._projectPath, `${latest._sessionId}.jsonl`);
+    let fileContent: string;
+    try {
+      fileContent = await readFile(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+
+    const acc = newAnalysisAcc(0, 0); // analyse the whole session (no time cutoff)
+    let contextTokens = 0; // window size of the most recent assistant request
+    let peakContextTokens = 0;
+    let model = latest.message.model || '';
+    let lastAssistantMs = -Infinity;
+    const userPromptTimes: number[] = [];
+    const readCounts: Record<string, number> = {};
+
+    for (const line of fileContent.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed === '') {
+        continue;
+      }
+      let parsed: any;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      // Reuse the shared analyser for per-category composition + tool-result sizes.
+      analyzeLine(parsed, acc);
+
+      const message = parsed.message;
+      if (!message || typeof message !== 'object') {
+        continue;
+      }
+      const role = message.role || parsed.type;
+      const tsMs = typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;
+
+      if (role === 'assistant' && message.usage) {
+        const ctx = this.recordContextTokens({ message } as ClaudeUsageRecord);
+        peakContextTokens = Math.max(peakContextTokens, ctx);
+        if (!isNaN(tsMs) && tsMs >= lastAssistantMs) {
+          lastAssistantMs = tsMs;
+          contextTokens = ctx;
+          if (typeof message.model === 'string') {
+            model = message.model;
+          }
+        }
+        // Count Read tool_use file paths for redundant-read detection.
+        if (Array.isArray(message.content)) {
+          for (const block of message.content) {
+            if (block && block.type === 'tool_use' && block.name === 'Read') {
+              const fp = block.input && typeof block.input.file_path === 'string' ? block.input.file_path : '';
+              if (fp) {
+                readCounts[fp] = (readCounts[fp] || 0) + 1;
+              }
+            }
+          }
+        }
+      } else if (role === 'user' && parsed.isMeta !== true && !isNaN(tsMs)) {
+        // Real, human-authored prompts (for topic-gap detection).
+        const c = message.content;
+        const hasText =
+          typeof c === 'string'
+            ? c.trim().length >= 4
+            : Array.isArray(c) &&
+              c.some((b: any) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim().length >= 4);
+        if (hasText) {
+          userPromptTimes.push(tsMs);
+        }
+      }
+    }
+
+    if (contextTokens === 0 && peakContextTokens === 0) {
+      return null; // no billable assistant turns yet
+    }
+
+    const analysis = finalizeAnalysis(acc);
+    const composition = analysis.categories;
+    const topToolResults = analysis.toolResultBreakdown.slice(0, 3);
+    const contentTotal = analysis.totalEstimatedTokens || 1;
+
+    const contextLimit = getModelContextLimit(model);
+    const fillRatio = contextLimit > 0 ? contextTokens / contextLimit : 0;
+
+    // --- Heuristic rot signals (offline only) ---
+    const signals: ContextRotSignal[] = [];
+
+    if (fillRatio >= 0.85) {
+      signals.push({ kind: 'nearLimit', value: Math.round(fillRatio * 100) });
+    }
+
+    // Largest single tool-result contributor dominating the context.
+    const topTool = analysis.toolResultBreakdown[0];
+    if (topTool) {
+      const share = topTool.estimatedTokens / contentTotal;
+      if (share >= 0.35 && topTool.estimatedTokens > 5000) {
+        signals.push({ kind: 'largeToolResult', label: topTool.key, value: Math.round(share * 100) });
+      }
+    }
+
+    // Carried-over / stale: window large, dominated by tool results + thinking,
+    // very little fresh user input.
+    const byKey = (k: string): number => composition.find((c) => c.key === k)?.estimatedTokens || 0;
+    const staleTokens = byKey('toolResults') + byKey('assistantThinking');
+    const promptTokens = byKey('userPrompts');
+    if (fillRatio >= 0.6 && staleTokens / contentTotal >= 0.6 && promptTokens / contentTotal <= 0.1) {
+      signals.push({ kind: 'staleContext', value: Math.round((staleTokens / contentTotal) * 100) });
+    }
+
+    // Redundant file re-reads.
+    let maxReads = 0;
+    let maxReadFile = '';
+    for (const [fp, n] of Object.entries(readCounts)) {
+      if (n > maxReads) {
+        maxReads = n;
+        maxReadFile = fp;
+      }
+    }
+    if (maxReads >= 3) {
+      signals.push({ kind: 'redundantReads', label: this.lastPathSegment(maxReadFile), value: maxReads });
+    }
+
+    // Multiple topics: largest gap between consecutive user prompts.
+    const TOPIC_GAP_MIN = 45;
+    let topicSwitchAt: string | undefined;
+    let topicSwitchGapMin: number | undefined;
+    userPromptTimes.sort((a, b) => a - b);
+    let maxGapMs = 0;
+    let gapAtMs = 0;
+    for (let i = 1; i < userPromptTimes.length; i++) {
+      const gap = userPromptTimes[i] - userPromptTimes[i - 1];
+      if (gap > maxGapMs) {
+        maxGapMs = gap;
+        gapAtMs = userPromptTimes[i];
+      }
+    }
+    if (maxGapMs >= TOPIC_GAP_MIN * 60_000) {
+      topicSwitchGapMin = Math.round(maxGapMs / 60_000);
+      topicSwitchAt = new Date(gapAtMs).toISOString();
+      signals.push({ kind: 'multiTopic', value: topicSwitchGapMin });
+    }
+
+    // --- Overall status ---
+    const hasLarge = signals.some((s) => s.kind === 'largeToolResult');
+    const hasMulti = signals.some((s) => s.kind === 'multiTopic');
+    let status: ContextHealth['status'] = 'healthy';
+    if (fillRatio >= 0.85 || hasLarge || (hasMulti && fillRatio >= 0.6)) {
+      status = 'rot';
+    } else if (fillRatio >= 0.6 || signals.length > 0) {
+      status = 'watch';
+    }
+
+    return {
+      sessionId: latest._sessionId,
+      projectName: latest._projectName || 'unknown',
+      model,
+      contextTokens,
+      peakContextTokens,
+      contextLimit,
+      fillRatio,
+      composition,
+      topToolResults,
+      signals,
+      status,
+      topicSwitchAt,
+      topicSwitchGapMin,
+    };
   }
 
   private static async getEarliestTimestamp(filePath: string): Promise<Date | null> {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ClaudeApiUsageResponse, ClaudeUsageLimit, SessionData, UsageData } from './types';
+import { ClaudeApiUsageResponse, ClaudeUsageLimit, ContextHealth, ContextRotSignal, SessionData, UsageData } from './types';
 import { I18n } from './i18n';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -8,6 +8,7 @@ export class StatusBarManager {
   private statusBarItem: vscode.StatusBarItem;
   private quotaItem: vscode.StatusBarItem;
   private cacheItem: vscode.StatusBarItem;
+  private contextItem: vscode.StatusBarItem;
   private isLoading: boolean = false;
 
   constructor() {
@@ -22,6 +23,10 @@ export class StatusBarManager {
     // Third item: prompt-cache warmth countdown.
     this.cacheItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
     this.cacheItem.command = 'claudeCodeUsage.showDetails';
+
+    // Fourth item: live Context Health for the active session.
+    this.contextItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 97);
+    this.contextItem.command = 'claudeCodeUsage.showDetails';
 
     this.updateStatusBar();
   }
@@ -159,16 +164,115 @@ export class StatusBarManager {
     return md;
   }
 
+  /**
+   * Update the live Context Health indicator for the active session.
+   * Shows the window fill ratio (e.g. "$(book) 78%") and, on a "rot" verdict, a
+   * warning icon + background. Hidden when no active session is available.
+   */
+  updateContextHealth(health: ContextHealth | null): void {
+    if (!health) {
+      this.contextItem.hide();
+      return;
+    }
+    const pct = Math.round(health.fillRatio * 100);
+    const icon = health.status === 'rot' ? '$(warning)' : '$(book)';
+    this.contextItem.text = `${icon} ${pct}%`;
+    this.contextItem.backgroundColor =
+      health.status === 'rot' ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+    this.contextItem.tooltip = this.createContextTooltip(health);
+    this.contextItem.show();
+  }
+
+  private createContextTooltip(health: ContextHealth): vscode.MarkdownString {
+    const t = I18n.t.contextHealth;
+    const p = I18n.t.popup;
+    const md = new vscode.MarkdownString();
+    md.supportThemeIcons = true;
+
+    const statusLabel =
+      health.status === 'rot' ? t.statusRot : health.status === 'watch' ? t.statusWatch : t.statusHealthy;
+    md.appendMarkdown(`**$(book) ${t.title} — ${statusLabel}**\n\n`);
+
+    const pct = Math.round(health.fillRatio * 100);
+    md.appendMarkdown(
+      `${t.windowSize}: **${I18n.formatNumber(health.contextTokens)}** / ${I18n.formatNumber(health.contextLimit)} (${pct}%)\n\n`
+    );
+
+    // Composition table — what is filling the window.
+    const total = health.composition.reduce((s, c) => s + c.estimatedTokens, 0) || 1;
+    const catLabel = (key: string): string => {
+      switch (key) {
+        case 'userPrompts':
+          return p.catUserPrompts;
+        case 'assistantText':
+          return p.catAssistantText;
+        case 'assistantThinking':
+          return p.catAssistantThinking;
+        case 'toolCalls':
+          return p.catToolCalls;
+        case 'toolResults':
+          return p.catToolResults;
+        default:
+          return key;
+      }
+    };
+    md.appendMarkdown(`| ${t.composition} | ${p.estTokens} | ${p.share} |\n`);
+    md.appendMarkdown(`|:--|--:|--:|\n`);
+    for (const c of health.composition) {
+      const share = Math.round((c.estimatedTokens / total) * 100);
+      md.appendMarkdown(`| ${catLabel(c.key)} | ${I18n.formatNumber(c.estimatedTokens)} | ${share}% |\n`);
+    }
+
+    // Detected rot signals.
+    if (health.signals.length > 0) {
+      md.appendMarkdown(`\n`);
+      for (const s of health.signals) {
+        md.appendMarkdown(`- $(warning) ${this.describeSignal(s)}\n`);
+      }
+    }
+
+    // Candidate topic-switch point.
+    if (health.topicSwitchAt && health.topicSwitchGapMin) {
+      const at = new Date(health.topicSwitchAt);
+      const time = isNaN(at.getTime()) ? '' : at.toLocaleTimeString();
+      md.appendMarkdown(`\n${t.topicSwitch}: **${time}** (${health.topicSwitchGapMin}m)\n`);
+    }
+
+    const suggestion = health.status === 'healthy' ? t.suggestHealthy : t.suggestClear;
+    md.appendMarkdown(`\n*${suggestion}*`);
+    return md;
+  }
+
+  private describeSignal(s: ContextRotSignal): string {
+    const t = I18n.t.contextHealth;
+    switch (s.kind) {
+      case 'nearLimit':
+        return `${t.sigNearLimit} (${s.value}%)`;
+      case 'largeToolResult':
+        return `${t.sigLargeToolResult}: ${s.label} (${s.value}%)`;
+      case 'staleContext':
+        return `${t.sigStaleContext} (${s.value}%)`;
+      case 'redundantReads':
+        return `${t.sigRedundantReads}: ${s.label} ×${s.value}`;
+      case 'multiTopic':
+        return `${t.sigMultiTopic} (${s.value}m)`;
+      default:
+        return '';
+    }
+  }
+
   private showNoData(): void {
     this.statusBarItem.text = `$(circle-slash) ${I18n.t.statusBar.noData}`;
     this.statusBarItem.tooltip = I18n.t.statusBar.notRunning;
     this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    this.contextItem.hide();
   }
 
   private showError(error: string): void {
     this.statusBarItem.text = `$(error) ${I18n.t.statusBar.error}`;
     this.statusBarItem.tooltip = error;
     this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+    this.contextItem.hide();
   }
 
   /**
@@ -297,5 +401,6 @@ export class StatusBarManager {
     this.statusBarItem.dispose();
     this.quotaItem.dispose();
     this.cacheItem.dispose();
+    this.contextItem.dispose();
   }
 }

@@ -115,6 +115,7 @@ export class ClaudeCodeUsageExtension {
       usageLimitTracking: config.get('usageLimitTracking', true),
       recordQuotaHistory: config.get('recordQuotaHistory', true),
       enableContentAnalysis: config.get('enableContentAnalysis', true),
+      enableContextHealth: config.get('enableContextHealth', true),
       projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat'
     };
   }
@@ -318,9 +319,15 @@ export class ClaudeCodeUsageExtension {
 
       const quotaHistory = await QuotaHistory.readHistory({ sinceDays: 30 });
 
+      // Live Context Health for the active session (offline heuristics only).
+      const contextHealth = config.enableContextHealth
+        ? await ClaudeDataLoader.getContextHealth(records, dataDirectory)
+        : null;
+
       // Update UI
       this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits);
       this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
+      this.statusBar.updateContextHealth(contextHealth);
       this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory);
 
     } catch (error) {
