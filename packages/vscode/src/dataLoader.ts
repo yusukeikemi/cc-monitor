@@ -226,6 +226,34 @@ function blockText(content: unknown): string {
   return '';
 }
 
+// Rough estimate of the tokens a single message contributes (text + thinking +
+// tool calls + tool results), for per-topic sizing in the Context Health view.
+function estimateMessageTokens(message: any): number {
+  const content = message?.content;
+  if (typeof content === 'string') {
+    return estimateTokens(content);
+  }
+  if (!Array.isArray(content)) {
+    return 0;
+  }
+  let n = 0;
+  for (const b of content) {
+    if (!b || typeof b !== 'object') {
+      continue;
+    }
+    if (typeof b.text === 'string') {
+      n += estimateTokens(b.text);
+    } else if (typeof b.thinking === 'string') {
+      n += estimateTokens(b.thinking);
+    } else if (b.type === 'tool_result') {
+      n += estimateTokens(blockText(b.content));
+    } else if (b.type === 'tool_use') {
+      n += estimateTokens(JSON.stringify(b.input || {}));
+    }
+  }
+  return n;
+}
+
 function addToBucket(map: Record<string, AnalysisBucket>, key: string, text: string): void {
   if (!text) {
     return;
@@ -772,13 +800,16 @@ export class ClaudeDataLoader {
       return null;
     }
 
+    const TOPIC_GAP_MIN = 45;
     const acc = newAnalysisAcc(0, 0); // analyse the whole session (no time cutoff)
     let contextTokens = 0; // window size of the most recent assistant request
     let peakContextTokens = 0;
     let model = latest.message.model || '';
     let lastAssistantMs = -Infinity;
-    const userPromptTimes: number[] = [];
     const readCounts: Record<string, number> = {};
+    const ctxSeries: { ts: number; ctx: number }[] = []; // context size per assistant turn
+    const lineEst: { ts: number; est: number }[] = []; // per-message token estimate (any role)
+    const promptTexts: { ts: number; text: string }[] = []; // real user prompts (for topics)
 
     for (const line of fileContent.split('\n')) {
       const trimmed = line.trim();
@@ -801,9 +832,19 @@ export class ClaudeDataLoader {
       const role = message.role || parsed.type;
       const tsMs = typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;
 
+      if (!isNaN(tsMs)) {
+        const est = estimateMessageTokens(message);
+        if (est > 0) {
+          lineEst.push({ ts: tsMs, est });
+        }
+      }
+
       if (role === 'assistant' && message.usage) {
         const ctx = this.recordContextTokens({ message } as ClaudeUsageRecord);
         peakContextTokens = Math.max(peakContextTokens, ctx);
+        if (!isNaN(tsMs)) {
+          ctxSeries.push({ ts: tsMs, ctx });
+        }
         if (!isNaN(tsMs) && tsMs >= lastAssistantMs) {
           lastAssistantMs = tsMs;
           contextTokens = ctx;
@@ -823,15 +864,17 @@ export class ClaudeDataLoader {
           }
         }
       } else if (role === 'user' && parsed.isMeta !== true && !isNaN(tsMs)) {
-        // Real, human-authored prompts (for topic-gap detection).
+        // Real, human-authored prompts (for topic-gap detection + topic labels).
         const c = message.content;
-        const hasText =
-          typeof c === 'string'
-            ? c.trim().length >= 4
-            : Array.isArray(c) &&
-              c.some((b: any) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim().length >= 4);
-        if (hasText) {
-          userPromptTimes.push(tsMs);
+        let pText = '';
+        if (typeof c === 'string') {
+          pText = c;
+        } else if (Array.isArray(c)) {
+          const tb = c.find((b: any) => b && b.type === 'text' && typeof b.text === 'string');
+          pText = tb ? tb.text : '';
+        }
+        if (pText.trim().length >= 4) {
+          promptTexts.push({ ts: tsMs, text: pText.trim().slice(0, 60) });
         }
       }
     }
@@ -886,24 +929,75 @@ export class ClaudeDataLoader {
       signals.push({ kind: 'redundantReads', label: this.lastPathSegment(maxReadFile), value: maxReads });
     }
 
-    // Multiple topics: largest gap between consecutive user prompts.
-    const TOPIC_GAP_MIN = 45;
+    // Split the session into topics at large prompt gaps, and find the single
+    // largest gap as the candidate topic-switch point.
+    const proms = promptTexts.slice().sort((a, b) => a.ts - b.ts);
     let topicSwitchAt: string | undefined;
     let topicSwitchGapMin: number | undefined;
-    userPromptTimes.sort((a, b) => a - b);
     let maxGapMs = 0;
     let gapAtMs = 0;
-    for (let i = 1; i < userPromptTimes.length; i++) {
-      const gap = userPromptTimes[i] - userPromptTimes[i - 1];
-      if (gap > maxGapMs) {
-        maxGapMs = gap;
-        gapAtMs = userPromptTimes[i];
+    const segments: { start: number; end: number; label: string }[] = [];
+    if (proms.length > 0) {
+      let segStart = proms[0].ts;
+      let segLabel = proms[0].text;
+      for (let i = 1; i < proms.length; i++) {
+        const gap = proms[i].ts - proms[i - 1].ts;
+        if (gap > maxGapMs) {
+          maxGapMs = gap;
+          gapAtMs = proms[i].ts;
+        }
+        if (gap >= TOPIC_GAP_MIN * 60_000) {
+          segments.push({ start: segStart, end: proms[i].ts, label: segLabel });
+          segStart = proms[i].ts;
+          segLabel = proms[i].text;
+        }
       }
+      segments.push({ start: segStart, end: Infinity, label: segLabel });
     }
     if (maxGapMs >= TOPIC_GAP_MIN * 60_000) {
       topicSwitchGapMin = Math.round(maxGapMs / 60_000);
       topicSwitchAt = new Date(gapAtMs).toISOString();
       signals.push({ kind: 'multiTopic', value: topicSwitchGapMin });
+    }
+
+    const topics = segments
+      .map((s) => ({
+        label: s.label,
+        estimatedTokens: lineEst.filter((l) => l.ts >= s.start && l.ts < s.end).reduce((n, l) => n + l.est, 0),
+        startTime: new Date(s.start).toISOString(),
+      }))
+      .sort((a, b) => b.estimatedTokens - a.estimatedTokens);
+
+    // Down-sampled context-growth series (oldest→newest) for the sparkline.
+    ctxSeries.sort((a, b) => a.ts - b.ts);
+    const rawSeries = ctxSeries.map((p) => p.ctx);
+    const MAX_POINTS = 24;
+    let contextSeries = rawSeries;
+    if (rawSeries.length > MAX_POINTS) {
+      contextSeries = [];
+      const step = (rawSeries.length - 1) / (MAX_POINTS - 1);
+      for (let i = 0; i < MAX_POINTS; i++) {
+        contextSeries.push(rawSeries[Math.round(i * step)]);
+      }
+    }
+
+    // Recent growth rate + a rough ETA to the model limit at that pace.
+    let growthTokensPerMin: number | undefined;
+    let etaToLimitMin: number | undefined;
+    if (ctxSeries.length >= 2) {
+      const last = ctxSeries[ctxSeries.length - 1];
+      const ref = ctxSeries[Math.max(0, ctxSeries.length - 6)];
+      const dtMin = (last.ts - ref.ts) / 60_000;
+      if (dtMin > 0) {
+        const rate = (last.ctx - ref.ctx) / dtMin;
+        if (rate > 0) {
+          growthTokensPerMin = Math.round(rate);
+          const remaining = contextLimit - last.ctx;
+          if (remaining > 0) {
+            etaToLimitMin = Math.max(1, Math.round(remaining / rate));
+          }
+        }
+      }
     }
 
     // --- Overall status ---
@@ -928,6 +1022,10 @@ export class ClaudeDataLoader {
       topToolResults,
       signals,
       status,
+      contextSeries,
+      growthTokensPerMin,
+      etaToLimitMin,
+      topics,
       topicSwitchAt,
       topicSwitchGapMin,
     };

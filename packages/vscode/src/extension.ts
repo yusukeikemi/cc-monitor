@@ -8,7 +8,7 @@ import { UsageWebviewProvider } from './webview';
 import { I18n } from './i18n';
 import { ClaudeApiClient } from './claudeApiClient';
 import { QuotaHistory, QuotaSnapshot } from './quotaHistory';
-import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ExtensionConfig } from './types';
+import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ContextHealth, ExtensionConfig } from './types';
 
 export class ClaudeCodeUsageExtension {
   private statusBar: StatusBarManager;
@@ -19,6 +19,9 @@ export class ClaudeCodeUsageExtension {
   private fileWatcher: fs.FSWatcher | undefined;
   private watchDebounceTimer: NodeJS.Timeout | undefined;
   private watchedDir: string | null = null;
+  // Debounce the "context rot" toast: at most one per session, re-armed after a gap.
+  private lastRotNotifiedSession: string | null = null;
+  private lastRotNotifiedAt: number = 0;
   private cache: {
     records: any[];
     contentAnalysis: ContentAnalysis | null;
@@ -116,6 +119,7 @@ export class ClaudeCodeUsageExtension {
       recordQuotaHistory: config.get('recordQuotaHistory', true),
       enableContentAnalysis: config.get('enableContentAnalysis', true),
       enableContextHealth: config.get('enableContextHealth', true),
+      contextHealthRotNotification: config.get('contextHealthRotNotification', false),
       projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat'
     };
   }
@@ -328,6 +332,7 @@ export class ClaudeCodeUsageExtension {
       this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits);
       this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
       this.statusBar.updateContextHealth(contextHealth);
+      this.maybeNotifyContextRot(config, contextHealth);
       this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory);
 
     } catch (error) {
@@ -337,6 +342,25 @@ export class ClaudeCodeUsageExtension {
       this.statusBar.updateUsageData(null, null, errorMessage);
       this.webviewProvider.updateData(null, null, null, null, [], [], [], errorMessage, null);
     }
+  }
+
+  /**
+   * Show a one-time, debounced toast the first time the active session turns
+   * "rot". Opt-in (contextHealthRotNotification). Re-armed for the same session
+   * only after a 30-minute quiet gap so it never nags on every refresh.
+   */
+  private maybeNotifyContextRot(config: ExtensionConfig, health: ContextHealth | null): void {
+    if (!config.contextHealthRotNotification || !health || health.status !== 'rot') {
+      return;
+    }
+    const now = Date.now();
+    const sameSession = this.lastRotNotifiedSession === health.sessionId;
+    if (sameSession && now - this.lastRotNotifiedAt < 30 * 60 * 1000) {
+      return;
+    }
+    this.lastRotNotifiedSession = health.sessionId;
+    this.lastRotNotifiedAt = now;
+    vscode.window.showWarningMessage(I18n.t.contextHealth.notifyRot);
   }
 
   /** Export the full quota history to a user-chosen CSV or JSON file. */

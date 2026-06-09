@@ -138,6 +138,13 @@ export interface ContextHealth {
   topToolResults: ContentSlice[];
   signals: ContextRotSignal[];
   status: 'healthy' | 'watch' | 'rot';
+  // Down-sampled context-window sizes over the session, oldest→newest (sparkline).
+  contextSeries: number[];
+  // Recent growth rate and a rough ETA to the model limit at that pace.
+  growthTokensPerMin?: number;
+  etaToLimitMin?: number;
+  // The session split into topics at large prompt gaps, sorted by token weight.
+  topics: { label: string; estimatedTokens: number; startTime: string }[];
   // Largest gap between consecutive user prompts — a candidate topic-switch point.
   topicSwitchAt?: string; // ISO timestamp
   topicSwitchGapMin?: number;
@@ -226,6 +233,9 @@ export interface ExtensionConfig {
   // Show the live Context Health indicator in the status bar. When false the
   // indicator is hidden and its (per-session) analysis is skipped during refresh.
   enableContextHealth: boolean;
+  // Pop a one-time (debounced) toast when the active session first turns "rot".
+  // Opt-in (default false). No effect when enableContextHealth is off.
+  contextHealthRotNotification: boolean;
   // How the Projects tab groups working directories:
   //   - 'git'    group by enclosing git repository (default; current behaviour)
   //   - 'folder' group by the heuristic top-level project folder only

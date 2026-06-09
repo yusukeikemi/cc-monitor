@@ -13,6 +13,11 @@ export interface Translations {
     windowSize: string;
     composition: string;
     topicSwitch: string;
+    growth: string;
+    pace: string;
+    etaToLimit: string;
+    topics: string;
+    notifyRot: string;
     statusHealthy: string;
     statusWatch: string;
     statusRot: string;
@@ -162,6 +167,11 @@ const translations: Record<SupportedLanguage, Translations> = {
       windowSize: 'Window',
       composition: "What's in context",
       topicSwitch: 'Topic-switch point',
+      growth: 'Growth',
+      pace: 'Pace',
+      etaToLimit: 'to limit',
+      topics: 'Topics',
+      notifyRot: 'Context is getting bloated — consider /clear to start a fresh topic.',
       statusHealthy: 'Healthy',
       statusWatch: 'Getting heavy',
       statusRot: 'Bloated',
@@ -307,6 +317,11 @@ const translations: Record<SupportedLanguage, Translations> = {
       windowSize: "Fenster",
       composition: "Was im Kontext ist",
       topicSwitch: "Themenwechsel-Punkt",
+      growth: "Wachstum",
+      pace: "Tempo",
+      etaToLimit: "bis Limit",
+      topics: "Themen",
+      notifyRot: "Der Kontext wird überladen — mit /clear ein neues Thema beginnen.",
       statusHealthy: "Gesund",
       statusWatch: "Wird voll",
       statusRot: "Überladen",
@@ -454,6 +469,11 @@ const translations: Record<SupportedLanguage, Translations> = {
       windowSize: '視窗',
       composition: '上下文內容',
       topicSwitch: '話題切換點',
+      growth: '成長',
+      pace: '速度',
+      etaToLimit: '距上限',
+      topics: '話題',
+      notifyRot: '上下文正在臃腫 — 建議使用 /clear 開始新話題。',
       statusHealthy: '健康',
       statusWatch: '漸趨臃腫',
       statusRot: '臃腫',
@@ -599,6 +619,11 @@ const translations: Record<SupportedLanguage, Translations> = {
       windowSize: '窗口',
       composition: '上下文内容',
       topicSwitch: '话题切换点',
+      growth: '增长',
+      pace: '速度',
+      etaToLimit: '距上限',
+      topics: '话题',
+      notifyRot: '上下文正在臃肿 — 建议使用 /clear 开始新话题。',
       statusHealthy: '健康',
       statusWatch: '渐趋臃肿',
       statusRot: '臃肿',
@@ -744,6 +769,11 @@ const translations: Record<SupportedLanguage, Translations> = {
       windowSize: 'ウィンドウ',
       composition: 'コンテキストの中身',
       topicSwitch: '話題の切り替え目安',
+      growth: '成長',
+      pace: 'ペース',
+      etaToLimit: '上限まで',
+      topics: '話題',
+      notifyRot: 'コンテキストが肥大化しています — /clear で新しい話題を始めると効果的です。',
       statusHealthy: '良好',
       statusWatch: 'やや過多',
       statusRot: '肥大化',
@@ -889,6 +919,11 @@ const translations: Record<SupportedLanguage, Translations> = {
       windowSize: '윈도우',
       composition: '컨텍스트 구성',
       topicSwitch: '주제 전환 지점',
+      growth: '증가',
+      pace: '속도',
+      etaToLimit: '한도까지',
+      topics: '주제',
+      notifyRot: '컨텍스트가 비대해지고 있습니다 — /clear로 새 주제를 시작하세요.',
       statusHealthy: '양호',
       statusWatch: '점점 과다',
       statusRot: '비대',

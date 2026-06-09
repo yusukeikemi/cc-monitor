@@ -175,12 +175,41 @@ export class StatusBarManager {
       return;
     }
     const pct = Math.round(health.fillRatio * 100);
-    const icon = health.status === 'rot' ? '$(warning)' : '$(book)';
-    this.contextItem.text = `${icon} ${pct}%`;
+    const icon = health.status === 'rot' ? '$(warning)' : health.status === 'watch' ? '$(dashboard)' : '$(book)';
+    let text = `${icon} ${this.gauge(health.fillRatio)} ${pct}%`;
+    // On a "rot" verdict driven by a dominating tool result, name the culprit.
+    const big = health.signals.find((s) => s.kind === 'largeToolResult');
+    if (health.status === 'rot' && big && big.label) {
+      text += ` · ${big.label}`;
+    }
+    this.contextItem.text = text;
     this.contextItem.backgroundColor =
       health.status === 'rot' ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
     this.contextItem.tooltip = this.createContextTooltip(health);
     this.contextItem.show();
+  }
+
+  /** Five-cell segment gauge, e.g. "▰▰▰▰▱". */
+  private gauge(ratio: number): string {
+    const cells = 5;
+    const filled = Math.max(0, Math.min(cells, Math.round(ratio * cells)));
+    return '▰'.repeat(filled) + '▱'.repeat(cells - filled);
+  }
+
+  /** Unicode sparkline scaled to the series' own peak (shows the growth shape). */
+  private sparkline(series: number[]): string {
+    if (!series || series.length === 0) {
+      return '';
+    }
+    const blocks = '▁▂▃▄▅▆▇█';
+    const hi = Math.max(...series) || 1;
+    return series.map((v) => blocks[Math.max(0, Math.min(7, Math.floor((v / hi) * 7.999)))]).join('');
+  }
+
+  /** Proportional fill bar, e.g. "██████░░░░". */
+  private bar(ratio: number, width: number = 10): string {
+    const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
+    return '█'.repeat(filled) + '░'.repeat(width - filled);
   }
 
   private createContextTooltip(health: ContextHealth): vscode.MarkdownString {
@@ -198,7 +227,22 @@ export class StatusBarManager {
       `${t.windowSize}: **${I18n.formatNumber(health.contextTokens)}** / ${I18n.formatNumber(health.contextLimit)} (${pct}%)\n\n`
     );
 
-    // Composition table — what is filling the window.
+    // Context-growth sparkline over the session.
+    const spark = this.sparkline(health.contextSeries);
+    if (spark) {
+      md.appendMarkdown(`${t.growth}: \`${spark}\` → ${pct}%\n\n`);
+    }
+
+    // Growth rate + ETA to the model limit at the current pace.
+    if (health.growthTokensPerMin && health.growthTokensPerMin > 0) {
+      let line = `${t.pace}: **+${I18n.formatNumber(health.growthTokensPerMin)}**/min`;
+      if (health.etaToLimitMin) {
+        line += ` · ${t.etaToLimit} ~${health.etaToLimitMin}m`;
+      }
+      md.appendMarkdown(`${line}\n\n`);
+    }
+
+    // Composition — a proportional bar per category of what fills the window.
     const total = health.composition.reduce((s, c) => s + c.estimatedTokens, 0) || 1;
     const catLabel = (key: string): string => {
       switch (key) {
@@ -216,11 +260,20 @@ export class StatusBarManager {
           return key;
       }
     };
-    md.appendMarkdown(`| ${t.composition} | ${p.estTokens} | ${p.share} |\n`);
-    md.appendMarkdown(`|:--|--:|--:|\n`);
+    md.appendMarkdown(`| ${t.composition} | | ${p.share} |\n`);
+    md.appendMarkdown(`|:--|:--|--:|\n`);
     for (const c of health.composition) {
-      const share = Math.round((c.estimatedTokens / total) * 100);
-      md.appendMarkdown(`| ${catLabel(c.key)} | ${I18n.formatNumber(c.estimatedTokens)} | ${share}% |\n`);
+      const frac = c.estimatedTokens / total;
+      md.appendMarkdown(`| ${catLabel(c.key)} | \`${this.bar(frac)}\` | ${Math.round(frac * 100)}% |\n`);
+    }
+
+    // Per-topic breakdown (only meaningful when the session spans >1 topic).
+    if (health.topics.length > 1) {
+      md.appendMarkdown(`\n**${t.topics}**\n\n`);
+      for (const topic of health.topics.slice(0, 4)) {
+        const label = topic.label ? `"${topic.label}"` : '—';
+        md.appendMarkdown(`- ${label} — ${I18n.formatNumber(topic.estimatedTokens)}\n`);
+      }
     }
 
     // Detected rot signals.
