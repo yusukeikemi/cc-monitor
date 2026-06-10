@@ -910,6 +910,11 @@ export class ClaudeDataLoader {
 
       if (role === 'assistant' && message.usage) {
         const ctx = this.recordContextTokens({ message } as ClaudeUsageRecord);
+        // Skip synthetic/error records (mirrors calculateUsageData): they carry
+        // zero usage and would otherwise become the "latest" window state.
+        if (message.model === '<synthetic>' || parsed.isApiErrorMessage === true || ctx === 0) {
+          continue;
+        }
         peakContextTokens = Math.max(peakContextTokens, ctx);
         currentCtx = ctx;
         const u = message.usage;

@@ -40,6 +40,11 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
   1,000,000-token window for the Context Health fill ratio (previously all
   Claude models were assumed 200K, producing >100% fill). The observed peak
   also clamps the limit as a lower bound for unknown models.
+- **Context Health picked up `<synthetic>` records as the latest window
+  state**: when the most recent assistant line was a synthetic/error record
+  (zero usage), the indicator reported model `<synthetic>` and 0% fill.
+  Synthetic, error and zero-token records are now skipped, mirroring
+  calculateUsageData.
 
 ## [2.0.0] — 2026-05-26
 
