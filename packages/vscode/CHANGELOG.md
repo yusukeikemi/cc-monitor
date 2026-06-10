@@ -4,7 +4,64 @@ All notable changes to this fork compared to upstream
 [`jack21/ClaudeCodeUsage`](https://github.com/jack21/ClaudeCodeUsage) (last
 upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangelog.com).
 
+## [Unreleased]
+
+### Added
+
+- **Insights snapshot export** (`claudeCodeUsage.exportInsights`, default true):
+  on each full refresh the extension writes its computed aggregates (usage,
+  activity, context health, latest quota) to
+  `~/.claude/cc-monitor/insights/latest.json` — a local, machine-readable
+  interface for the new Claude Code skills. Conversation text (prompts) is
+  deliberately excluded from the snapshot.
+- **Claude Code skills** (repo-level, subscription-scope LLM analysis — no
+  external APIs, no headless `claude -p`):
+  - `/cc-usage-advice` — usage/cost/quota optimisation advice generated from
+    the insights snapshot (secure revival of the removed upstream AI-advice
+    feature; data goes to Anthropic only, via the user's own session).
+  - `/cc-session-review` — per-session retrospective with a success verdict
+    (completed / partial / abandoned), wasted-token analysis, loop detection
+    and improvement suggestions, fed by the deterministic
+    `scripts/extract-session.mjs` extractor (zero-dep, read-only).
+
+### Fixed
+
+- **Context Health silently broken when logs carry `cwd`** (i.e. always, on
+  current Claude Code): `getContextHealth` joined the record's real working
+  directory under `~/.claude/projects/`, producing an invalid path, so the
+  indicator/tab/snapshot returned null. Records now carry the encoded on-disk
+  log folder (`_logDir`) and the lookup uses it. Surfaced by the insights
+  snapshot verification.
+- **Claude Fable 5 pricing**: was falling back to Sonnet rates ($3/$15);
+  added the real tier ($10/$50, cache write $12.50, cache read $1.00 per
+  MTok) plus a `fable` family fallback. Historical cost figures for Fable
+  sessions were under-reported ~3.3x and will correct on next refresh.
+- **1M context windows**: Fable 5, Opus 4.6/4.7/4.8 and Sonnet 4.6 now use a
+  1,000,000-token window for the Context Health fill ratio (previously all
+  Claude models were assumed 200K, producing >100% fill). The observed peak
+  also clamps the limit as a lower bound for unknown models.
+- **Context Health picked up `<synthetic>` records as the latest window
+  state**: when the most recent assistant line was a synthetic/error record
+  (zero usage), the indicator reported model `<synthetic>` and 0% fill.
+  Synthetic, error and zero-token records are now skipped, mirroring
+  calculateUsageData.
+
 ## [2.0.0] — 2026-05-26
+
+### Removed (vendoring security audit)
+
+Two upstream features that communicate with third-party (non-Anthropic) servers
+were removed when this codebase was vendored (see
+[`docs/security-audit-jack21.md`](../../docs/security-audit-jack21.md)):
+
+- **AI advice** (`Get AI Usage Advice` command, `advisor.ts`, `advice.*`
+  settings) — sent usage summaries and samples of the user's actual prompts to
+  an OpenAI-compatible endpoint (DeepSeek by default).
+- **Online pricing refresh** (`Refresh Model Pricing` command) — fetched the
+  LiteLLM pricing dataset from `raw.githubusercontent.com`. Only the bundled
+  pricing table is used now.
+
+As a result, the extension communicates with official Anthropic domains only.
 
 ### Added
 
@@ -13,16 +70,14 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
   table (verified against the official Anthropic pricing page).
 - Reference pricing for common non-Anthropic models that may appear in proxied
   Claude Code setups: **OpenAI** (GPT-5.x, 4.1.x, 4o, o3, o4-mini), **Google
-  Gemini** (2.5 Pro/Flash, 2.0 Flash), **DeepSeek** (chat / reasoner /
-  v4-flash), **Moonshot Kimi** (K2.5 / K2.6), **Zhipu GLM** (4.5 / 4.6) and
-  **Alibaba Qwen** (Max / Plus / Turbo / Long).
+  Gemini** (2.5 Pro/Flash, 2.0 Flash), **Moonshot Kimi** (K2 / K2.5 / K2.6),
+  **Zhipu GLM** (4.5 / 4.5-Air / 4.6) and **Alibaba Qwen** (Max / Plus /
+  Turbo / Long).
 - **Family-aware pricing fallback**: unknown model snapshots are now priced
   against the current tier of their detected family (Opus / Sonnet / Haiku /
-  GPT / Gemini / DeepSeek / Kimi / GLM / Qwen) instead of always falling back
+  GPT / Gemini / Kimi / GLM / Qwen) instead of always falling back
   to Sonnet 4.
 - **Per-model rates** displayed inline in the model breakdown section.
-- **`Refresh Model Pricing`** command + button pulls live prices from
-  LiteLLM's public dataset as runtime overrides.
 
 #### Quota tracking (real `/usage` data)
 - **5-hour and weekly limit utilisation** + reset times fetched via Claude
@@ -55,24 +110,6 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
 - **Peak context** column on the Sessions tab, mirroring what `/context`
   reports for a single request.
 
-#### AI advice (opt-in)
-- **`Get AI Usage Advice`** command + button. Sends an aggregate summary
-  plus a sample of your recent user prompts (or just the aggregates if
-  prompts are unavailable) to an OpenAI-compatible chat endpoint
-  (DeepSeek V4 Pro by default, `reasoning_effort=max`) and opens the
-  optimisation advice as a Markdown document.
-- **Scope picker**: overall, or one specific project.
-- Output filename is `claude-advice-<scope>-YYYY-MM-DD_HHmm.md`.
-- Advice model is instructed to reply in the user's UI language.
-- **Demo-mode fallback**: if no API key is configured, the command offers
-  a `Preview demo` option that opens a static example of what real advice
-  looks like — so users can decide whether to set up a key before
-  configuring one. The demo file is filename-marked `…-DEMO-…`, opens
-  with a prominent banner ("This file is a static demo, not real advice"
-  + 4 enable steps), and the body is **localised per UI language**
-  (en / zh-CN / zh-TW / ja / ko / de-DE) so users can judge the feature
-  in their own language.
-
 #### Quality-of-life
 - **Status-bar tooltip** is now an aligned Markdown table.
 - Status bar also shows the **current-session cost** next to today's cost.
@@ -80,26 +117,15 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
 - **Reading-friendly timestamps** ("Today HH:MM", "Yesterday HH:MM",
   "MM-DD HH:MM", "YYYY-MM-DD").
 - **Sortable columns** on Sessions / Projects / Branches tabs.
-- **`Refresh Model Pricing`** + `Get AI Usage Advice` commands in the
-  Command Palette.
 
 #### Settings (all opt-in)
 - `enableContentAnalysis` — toggle the Content tab + analysis pipeline.
 - `projectGroupingMode` — `git` (default), `folder` (no fs walk) or `flat`.
 - `compactNumbers` — toggle `1.2M`/`345K` formatting.
 - `usageLimitTracking` — enable/disable the OAuth quota indicator.
-- `adviceApiKey` / `adviceApiUrl` / `adviceModel` / `adviceReasoningEffort` —
-  AI advice configuration.
 
 ### Changed
 
-- **`advice.apiKey` is no longer back-compat read from the pre-2.0
-  `adviceApiKey` flat key.** Other `advice.*` config still falls back so
-  URL / model / effort survive the rename. Reason: with the apiKey
-  fallback, clearing the *new* key in Settings did not actually disable
-  the feature (the old key kept it alive silently and the demo-mode
-  fallback never triggered). Migration: if you set `adviceApiKey`
-  before 2.0, re-paste it under **`claudeCodeUsage.advice.apiKey`**.
 - **OAuth usage API calls now go through the system `curl` binary** instead
   of Node's `fetch` / `https`. Reason: Anthropic's edge now rejects
   requests whose TLS ClientHello (JA3/JA4) does not match a real CLI
@@ -139,8 +165,6 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
   doesn't match the user's actual zone. **Closes upstream #10.**
 - `compactNumbers` — toggle `1.2M`/`345K` formatting.
 - `usageLimitTracking` — enable/disable the OAuth quota indicator.
-- `adviceApiKey` / `adviceApiUrl` / `adviceModel` / `adviceReasoningEffort` —
-  AI advice configuration.
 
 ### Issues closed by this release
 

@@ -107,6 +107,16 @@
           "default": false,
           "description": "Pop a one-time notification when the active session first shows 'context rot'. Debounced to at most once per session (re-armed after a 30-minute quiet gap). Requires enableContextHealth."
         },
+        "claudeCodeUsage.quotaThresholdNotification": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pop a warning when the 5-hour quota crosses 80% (and again at 95%), so heavy tasks can be paused or deferred before the window is exhausted. Re-armed when the quota resets. Requires usageLimitTracking."
+        },
+        "claudeCodeUsage.exportInsights": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write a machine-readable snapshot of the computed usage analysis to ~/.claude/cc-monitor/insights/latest.json on each refresh, for use by the cc-monitor Claude Code skills (/cc-usage-advice etc.). Local file only — nothing is transmitted."
+        },
         "claudeCodeUsage.projectGroupingMode": {
           "type": "string",
           "enum": [

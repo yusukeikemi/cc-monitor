@@ -8,6 +8,7 @@ import { calculateCostBreakdown, getModelContextLimit, getModelPricing } from '.
 import {
   ActivityAnalysis,
   BranchUsage,
+  CacheBustEvent,
   ClaudeUsageRecord,
   ContentAnalysis,
   ContentSlice,
@@ -141,6 +142,7 @@ interface AnalysisAcc {
   mainOutputTokens: number;
   sidechainOutputTokens: number;
   assistantTurns: number; // billable main-thread assistant turns
+  thinkingBlocks: number; // thinking blocks seen (text may be redacted/empty)
   heatmap: number[][];
   titlesBySession: Map<string, string>;
   windowDays: number;
@@ -172,6 +174,7 @@ function newAnalysisAcc(cutoffMs: number, windowDays: number): AnalysisAcc {
     mainOutputTokens: 0,
     sidechainOutputTokens: 0,
     assistantTurns: 0,
+    thinkingBlocks: 0,
     heatmap: Array.from({ length: 7 }, () => new Array<number>(24).fill(0)),
     titlesBySession: new Map<string, string>(),
     windowDays,
@@ -207,6 +210,21 @@ function estimateTokens(text: string): number {
     }
   }
   return Math.round(cjk / 1.5 + (len - cjk) / 4);
+}
+
+// Human-readable label for a user prompt. Slash-command invocations are logged
+// wrapped in harness XML (<command-name>…, <command-message>…, local command
+// output in <local-command-stdout>…) — show the command name instead of the
+// raw markup, and strip the other harness tags from ordinary prompts.
+function promptLabel(text: string): string {
+  const cmd = text.match(/<command-name>([^<]+)<\/command-name>/);
+  if (cmd && cmd[1].trim()) {
+    return cmd[1].trim();
+  }
+  return text
+    .replace(/<\/?(?:command-name|command-message|command-args|command-contents|local-command-stdout|local-command-caveat|system-reminder)>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Flatten a content value (string, or array of blocks) to plain text.
@@ -458,8 +476,11 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
         }
         if (block.type === 'text' && typeof block.text === 'string') {
           addToBucket(acc.cat, 'assistantText', block.text);
-        } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
-          addToBucket(acc.cat, 'assistantThinking', block.thinking);
+        } else if (block.type === 'thinking') {
+          acc.thinkingBlocks++;
+          if (typeof block.thinking === 'string') {
+            addToBucket(acc.cat, 'assistantThinking', block.thinking);
+          }
         } else if (block.type === 'tool_use') {
           if (typeof block.id === 'string' && typeof block.name === 'string') {
             acc.toolIdToName[block.id] = block.name;
@@ -595,6 +616,7 @@ function finalizeActivity(acc: AnalysisAcc): ActivityAnalysis {
     assistantTurns: acc.assistantTurns,
     thinkingTokensEst: acc.cat['assistantThinking']?.tokens || 0,
     assistantTextTokensEst: acc.cat['assistantText']?.tokens || 0,
+    thinkingBlocksSeen: acc.thinkingBlocks,
     heatmap: acc.heatmap,
     recentTitles,
   };
@@ -723,6 +745,7 @@ export class ClaudeDataLoader {
               // over the lossy, dash-encoded folder name when it is available.
               const record = data as ClaudeUsageRecord;
               record._sessionId = sessionInfo.sessionId;
+              record._logDir = sessionInfo.projectPath;
               const cwd = (parsed as { cwd?: unknown }).cwd;
               if (typeof cwd === 'string' && cwd.trim() !== '') {
                 record._projectPath = cwd;
@@ -825,18 +848,29 @@ export class ClaudeDataLoader {
     }
     let latest: ClaudeUsageRecord | null = null;
     let latestMs = -Infinity;
+    // Earliest record too: its _projectName is what the Sessions tab shows for
+    // this session (the cwd can drift mid-session, e.g. into a subfolder).
+    let first: ClaudeUsageRecord | null = null;
+    let firstMs = Infinity;
     for (const r of pool) {
       const ms = new Date(r.timestamp).getTime();
       if (!isNaN(ms) && ms > latestMs) {
         latestMs = ms;
         latest = r;
       }
+      if (!isNaN(ms) && ms < firstMs) {
+        firstMs = ms;
+        first = r;
+      }
     }
-    if (!latest || !latest._sessionId || !latest._projectPath) {
+    // The on-disk folder is the encoded _logDir; _projectPath holds the real
+    // cwd and would produce an invalid path under projects/.
+    const logDir = latest ? latest._logDir || latest._projectPath : undefined;
+    if (!latest || !latest._sessionId || !logDir) {
       return null;
     }
 
-    const filePath = path.join(dataDirectory, CLAUDE_PROJECTS_DIR_NAME, latest._projectPath, `${latest._sessionId}.jsonl`);
+    const filePath = path.join(dataDirectory, CLAUDE_PROJECTS_DIR_NAME, logDir, `${latest._sessionId}.jsonl`);
     let fileContent: string;
     try {
       fileContent = await readFile(filePath, 'utf-8');
@@ -862,6 +896,7 @@ export class ClaudeDataLoader {
     const ctxSeries: { ts: number; ctx: number }[] = []; // context size per assistant turn
     const lineEst: { ts: number; est: number }[] = []; // per-message token estimate (any role)
     const promptTexts: { ts: number; text: string }[] = []; // real user prompts (for topics)
+    let largestUserPromptTokens = 0; // biggest single prompt (paste detection)
 
     for (const line of fileContent.split('\n')) {
       const trimmed = line.trim();
@@ -906,6 +941,11 @@ export class ClaudeDataLoader {
 
       if (role === 'assistant' && message.usage) {
         const ctx = this.recordContextTokens({ message } as ClaudeUsageRecord);
+        // Skip synthetic/error records (mirrors calculateUsageData): they carry
+        // zero usage and would otherwise become the "latest" window state.
+        if (message.model === '<synthetic>' || parsed.isApiErrorMessage === true || ctx === 0) {
+          continue;
+        }
         peakContextTokens = Math.max(peakContextTokens, ctx);
         currentCtx = ctx;
         const u = message.usage;
@@ -951,18 +991,33 @@ export class ClaudeDataLoader {
             }
           }
         }
-      } else if (role === 'user' && parsed.isMeta !== true && !isNaN(tsMs)) {
-        // Real, human-authored prompts (for topic-gap detection + topic labels).
+      } else if (role === 'user' && !isNaN(tsMs)) {
         const c = message.content;
         let pText = '';
+        let fullText = '';
         if (typeof c === 'string') {
           pText = c;
+          fullText = c;
         } else if (Array.isArray(c)) {
           const tb = c.find((b: any) => b && b.type === 'text' && typeof b.text === 'string');
           pText = tb ? tb.text : '';
+          // All text blocks together = what the message actually adds to the
+          // window (tool_result blocks are counted separately).
+          for (const b of c) {
+            if (b && b.type === 'text' && typeof b.text === 'string') {
+              fullText += b.text;
+            }
+          }
         }
-        if (pText.trim().length >= 4) {
-          promptTexts.push({ ts: tsMs, text: pText.trim().slice(0, 60) });
+        // Track meta messages too: harness-injected content (skill bodies,
+        // command expansions) fills the window just like a paste does.
+        largestUserPromptTokens = Math.max(largestUserPromptTokens, estimateTokens(fullText));
+        // Real, human-authored prompts only (topic-gap detection + topic labels).
+        if (parsed.isMeta !== true) {
+          const label = promptLabel(pText);
+          if (label.length >= 4) {
+            promptTexts.push({ ts: tsMs, text: label.slice(0, 60) });
+          }
         }
       }
     }
@@ -976,7 +1031,9 @@ export class ClaudeDataLoader {
     const topToolResults = analysis.toolResultBreakdown.slice(0, 3);
     const contentTotal = analysis.totalEstimatedTokens || 1;
 
-    const contextLimit = getModelContextLimit(model);
+    // The observed peak is a lower bound on the real window — protects against
+    // unknown/newer models whose table entry is too small (fill% would exceed 100).
+    const contextLimit = Math.max(getModelContextLimit(model), peakContextTokens);
     const fillRatio = contextLimit > 0 ? contextTokens / contextLimit : 0;
 
     // --- Heuristic rot signals (offline only) ---
@@ -1098,9 +1155,11 @@ export class ClaudeDataLoader {
     // e.g. a mid-session model switch or system/tool churn. Those re-writes pay
     // the 1.25x write rate instead of the 0.1x read rate.
     const CACHE_PREFIX_MIN = 4096;
+    const CACHE_TTL_MS = 5 * 60 * 1000;
     turns.sort((a, b) => a.ts - b.ts);
     let cacheBustCount = 0;
     let cacheWastedTokens = 0;
+    const cacheBusts: CacheBustEvent[] = [];
     for (let i = 1; i < turns.length; i++) {
       const prev = turns[i - 1];
       const cur = turns[i];
@@ -1108,6 +1167,15 @@ export class ClaudeDataLoader {
       if (prevCached >= CACHE_PREFIX_MIN && cur.read < prevCached * 0.5 && cur.create >= CACHE_PREFIX_MIN) {
         cacheBustCount++;
         cacheWastedTokens += cur.create;
+        // Attribute the bust to its most likely trigger so the fix is obvious:
+        // a model switch invalidates the prefix outright; a >TTL idle gap lets
+        // the cache expire; near-simultaneous turns are parallel requests that
+        // each paid the write before the cache warmed; anything else is prefix
+        // churn (system/tool changes).
+        const gapMs = cur.ts - prev.ts;
+        const cause: CacheBustEvent['cause'] =
+          cur.model !== prev.model ? 'modelSwitch' : gapMs > CACHE_TTL_MS ? 'ttlExpiry' : gapMs <= 2000 ? 'parallel' : 'other';
+        cacheBusts.push({ at: new Date(cur.ts).toISOString(), cause, wastedTokens: cur.create });
       }
     }
     const pricing = getModelPricing(model);
@@ -1175,6 +1243,11 @@ export class ClaudeDataLoader {
     if (maxRepeatedCall >= 4) {
       signals.push({ kind: 'repeatedCalls', label: maxRepeatedCallLabel, value: maxRepeatedCall });
     }
+    // A single prompt this big is almost always pasted file/log content; it
+    // stays in the window (and on the bill) for every following turn.
+    if (largestUserPromptTokens >= 10000) {
+      signals.push({ kind: 'largeUserPrompt', value: Math.round(largestUserPromptTokens / 1000) });
+    }
 
     // --- Overall status ---
     const hasLarge = signals.some((s) => s.kind === 'largeToolResult');
@@ -1188,7 +1261,9 @@ export class ClaudeDataLoader {
 
     return {
       sessionId: latest._sessionId,
-      projectName: latest._projectName || 'unknown',
+      // Use the earliest record's project (same as the Sessions tab) — the cwd
+      // of later records can drift into subfolders and mislabel the session.
+      projectName: first?._projectName || latest._projectName || 'unknown',
       model,
       contextTokens,
       peakContextTokens,
@@ -1201,9 +1276,11 @@ export class ClaudeDataLoader {
       cacheBustCount,
       cacheWastedTokens,
       cacheWastedUSD,
+      cacheBusts,
       baselineTokens,
       reclaimableTokens,
       fullFileReads,
+      largestUserPromptTokens,
       errorRateLowCtx,
       errorRateHighCtx,
       maxRepeatedCall,

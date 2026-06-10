@@ -7,6 +7,7 @@ import { StatusBarManager } from './statusBar';
 import { UsageWebviewProvider } from './webview';
 import { I18n } from './i18n';
 import { ClaudeApiClient } from './claudeApiClient';
+import { InsightsExporter } from './insightsExporter';
 import { QuotaHistory, QuotaSnapshot } from './quotaHistory';
 import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ContextHealth, ExtensionConfig } from './types';
 
@@ -22,6 +23,9 @@ export class ClaudeCodeUsageExtension {
   // Debounce the "context rot" toast: at most one per session, re-armed after a gap.
   private lastRotNotifiedSession: string | null = null;
   private lastRotNotifiedAt: number = 0;
+  // Highest 5-hour quota threshold (80/95) already toasted in the current
+  // window; reset to 0 when utilisation drops (i.e. the window rolled over).
+  private quotaNotifiedThreshold = 0;
   private cache: {
     records: any[];
     contentAnalysis: ContentAnalysis | null;
@@ -120,7 +124,9 @@ export class ClaudeCodeUsageExtension {
       enableContentAnalysis: config.get('enableContentAnalysis', true),
       enableContextHealth: config.get('enableContextHealth', true),
       contextHealthRotNotification: config.get('contextHealthRotNotification', false),
-      projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat'
+      quotaThresholdNotification: config.get('quotaThresholdNotification', true),
+      projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat',
+      exportInsights: config.get('exportInsights', true)
     };
   }
 
@@ -241,6 +247,7 @@ export class ClaudeCodeUsageExtension {
           this.outputChannel.appendLine(`quota-history: append failed: ${(e as Error).message}`);
         });
       }
+      this.maybeNotifyQuotaThreshold(config, fetched);
       return fetched;
     }
     // Keep showing the last known value if a refresh fails.
@@ -335,6 +342,25 @@ export class ClaudeCodeUsageExtension {
       this.maybeNotifyContextRot(config, contextHealth);
       this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory, contextHealth);
 
+      // Snapshot for the cc-monitor Claude Code skills (local file only).
+      if (config.exportInsights) {
+        void InsightsExporter.write({
+          generator: 'cc-monitor-vscode/2.0.0',
+          dataDirectory,
+          today: todayData,
+          thisMonth: monthData,
+          allTime: allTimeData,
+          sessions: sessionBreakdown,
+          projects: projectBreakdown,
+          activity: activityAnalysis,
+          content: contentAnalysis,
+          contextHealth,
+          quotaLatest: usageLimits
+        }).catch((e) => {
+          this.outputChannel.appendLine(`insights: export failed: ${(e as Error).message}`);
+        });
+      }
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       console.error('Error refreshing Claude Code usage data:', error);
@@ -361,6 +387,39 @@ export class ClaudeCodeUsageExtension {
     this.lastRotNotifiedSession = health.sessionId;
     this.lastRotNotifiedAt = now;
     vscode.window.showWarningMessage(I18n.t.contextHealth.notifyRot);
+  }
+
+  /**
+   * Warn once when the 5-hour quota crosses 80%, and again at 95%, so heavy
+   * work can be paused before the window is exhausted mid-task. Re-armed when
+   * utilisation drops back below 80% (the window reset).
+   */
+  private maybeNotifyQuotaThreshold(config: ExtensionConfig, limits: ClaudeApiUsageResponse): void {
+    if (!config.quotaThresholdNotification) {
+      return;
+    }
+    const fiveHour = limits.five_hour;
+    if (!fiveHour || typeof fiveHour.utilization !== 'number') {
+      return;
+    }
+    const pct = fiveHour.utilization;
+    const threshold = pct >= 95 ? 95 : pct >= 80 ? 80 : 0;
+    if (threshold === 0) {
+      this.quotaNotifiedThreshold = 0;
+      return;
+    }
+    if (threshold <= this.quotaNotifiedThreshold) {
+      return;
+    }
+    this.quotaNotifiedThreshold = threshold;
+    const resetDate = new Date(fiveHour.resets_at);
+    const reset = isNaN(resetDate.getTime())
+      ? '—'
+      : resetDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const message = I18n.t.statusBar.quotaWarning
+      .replace('{pct}', String(Math.round(pct)))
+      .replace('{reset}', reset);
+    vscode.window.showWarningMessage(message);
   }
 
   /** Export the full quota history to a user-chosen CSV or JSON file. */
