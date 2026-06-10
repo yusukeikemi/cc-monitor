@@ -285,6 +285,10 @@ export interface ExtensionConfig {
   //   - 'folder' group by the heuristic top-level project folder only
   //   - 'flat'   no grouping; every working directory is its own row
   projectGroupingMode: 'git' | 'folder' | 'flat';
+  // Write a machine-readable snapshot of the computed analysis to
+  // ~/.claude/cc-monitor/insights/latest.json on each full refresh, for the
+  // cc-monitor Claude Code skills. Local file only — nothing is transmitted.
+  exportInsights: boolean;
 }
 
 export interface ModelPricing {

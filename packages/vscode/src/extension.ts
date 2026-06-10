@@ -7,6 +7,7 @@ import { StatusBarManager } from './statusBar';
 import { UsageWebviewProvider } from './webview';
 import { I18n } from './i18n';
 import { ClaudeApiClient } from './claudeApiClient';
+import { InsightsExporter } from './insightsExporter';
 import { QuotaHistory, QuotaSnapshot } from './quotaHistory';
 import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ContextHealth, ExtensionConfig } from './types';
 
@@ -120,7 +121,8 @@ export class ClaudeCodeUsageExtension {
       enableContentAnalysis: config.get('enableContentAnalysis', true),
       enableContextHealth: config.get('enableContextHealth', true),
       contextHealthRotNotification: config.get('contextHealthRotNotification', false),
-      projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat'
+      projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat',
+      exportInsights: config.get('exportInsights', true)
     };
   }
 
@@ -334,6 +336,25 @@ export class ClaudeCodeUsageExtension {
       this.statusBar.updateContextHealth(contextHealth);
       this.maybeNotifyContextRot(config, contextHealth);
       this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory, contextHealth);
+
+      // Snapshot for the cc-monitor Claude Code skills (local file only).
+      if (config.exportInsights) {
+        void InsightsExporter.write({
+          generator: 'cc-monitor-vscode/2.0.0',
+          dataDirectory,
+          today: todayData,
+          thisMonth: monthData,
+          allTime: allTimeData,
+          sessions: sessionBreakdown,
+          projects: projectBreakdown,
+          activity: activityAnalysis,
+          content: contentAnalysis,
+          contextHealth,
+          quotaLatest: usageLimits
+        }).catch((e) => {
+          this.outputChannel.appendLine(`insights: export failed: ${(e as Error).message}`);
+        });
+      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
