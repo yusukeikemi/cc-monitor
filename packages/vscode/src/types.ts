@@ -127,12 +127,27 @@ export interface ContextRotSignal {
     | 'largeBaseline'
     | 'fullFileReads'
     | 'contextDegradation'
-    | 'repeatedCalls';
+    | 'repeatedCalls'
+    | 'largeUserPrompt';
   // Contextual numbers for the renderer (a percentage, a count, or minutes,
   // depending on `kind`).
   value?: number;
   // Contextual label for the renderer (e.g. a tool name or file name).
   label?: string;
+}
+
+// One cache-bust event with its likely cause, so the renderer (and the
+// cc-usage-advice skill) can tell the user *what* broke the cache, not just
+// how often it broke.
+export interface CacheBustEvent {
+  at: string; // ISO timestamp of the turn that re-wrote the prefix
+  // ttlExpiry: >5min gap since the previous turn (the prompt cache expired);
+  // modelSwitch: the model changed between turns; parallel: requests fired
+  // near-simultaneously, each re-writing the prefix before the first response
+  // could warm the cache; other: prefix churn (system prompt / tool schema
+  // changes) with no obvious trigger.
+  cause: 'ttlExpiry' | 'modelSwitch' | 'parallel' | 'other';
+  wastedTokens: number; // cache-write tokens of the re-written prefix
 }
 
 // Live health of the currently-active session's context window. Estimated
@@ -162,6 +177,8 @@ export interface ContextHealth {
   cacheBustCount: number;
   cacheWastedTokens: number;
   cacheWastedUSD: number;
+  // Individual bust events, time-ordered, each attributed to a likely cause.
+  cacheBusts: CacheBustEvent[];
   // Per-session startup baseline (system prompt + tool schemas + CLAUDE.md),
   // approximated by the first request's written/processed prefix. A large
   // baseline is paid on every session regardless of the work.
@@ -170,6 +187,11 @@ export interface ContextHealth {
   reclaimableTokens: number;
   // Read tool calls that dumped a whole file (no offset/limit line range).
   fullFileReads: number;
+  // Largest single user-role message in the session (estimated tokens),
+  // including harness-injected content (skill bodies, command expansions). A
+  // huge value means pasted or injected content entered the window — it then
+  // stays billable for every following turn.
+  largestUserPromptTokens: number;
   // Quality-aware context-rot proxy: tool-error rate (%) in the lower vs upper
   // half of the context window — a local stand-in for length-driven
   // degradation. -1 when there isn't enough sample to compute.
@@ -253,6 +275,10 @@ export interface ActivityAnalysis {
   assistantTurns: number;
   thinkingTokensEst: number;
   assistantTextTokensEst: number;
+  // Thinking blocks seen in the window. Newer Claude Code versions persist
+  // thinking blocks with the text redacted (signature only), so when this is
+  // >0 while thinkingTokensEst is 0 the share is unknown — not zero.
+  thinkingBlocksSeen: number;
   // 7×24 grid of assistant turns by local weekday (0=Sun) and hour.
   heatmap: number[][];
   // Most recent session titles (auto-generated), newest first.
@@ -284,6 +310,10 @@ export interface ExtensionConfig {
   // Pop a one-time (debounced) toast when the active session first turns "rot".
   // Opt-in (default false). No effect when enableContextHealth is off.
   contextHealthRotNotification: boolean;
+  // Pop a warning toast when the 5-hour quota crosses 80% (and again at 95%),
+  // so heavy work can be paused before the window is exhausted. Re-armed when
+  // the quota resets. No effect when usageLimitTracking is off.
+  quotaThresholdNotification: boolean;
   // How the Projects tab groups working directories:
   //   - 'git'    group by enclosing git repository (default; current behaviour)
   //   - 'folder' group by the heuristic top-level project folder only

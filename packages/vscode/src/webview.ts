@@ -1517,6 +1517,9 @@ export class UsageWebviewProvider {
     // --- tools table ---
     let toolsTable = '';
     if (a.tools.length > 0) {
+      // Only some tools report timing; when none did, drop the duration column
+      // instead of showing a dash for every row.
+      const hasDurations = a.tools.some((tool) => tool.durationSamples > 0);
       let rows = '';
       a.tools.forEach((tool) => {
         const avg = tool.durationSamples > 0 ? fmtDur(tool.totalDurationMs / tool.durationSamples) : '—';
@@ -1526,14 +1529,14 @@ export class UsageWebviewProvider {
           '<td class="number-cell">' + num(tool.count) + '</td>' +
           '<td class="number-cell">' + num(tool.errors) + '</td>' +
           '<td class="number-cell">' + pct(tool.errors, tool.count) + '</td>' +
-          '<td class="number-cell">' + avg + '</td>' +
+          (hasDurations ? '<td class="number-cell">' + avg + '</td>' : '') +
           '</tr>';
       });
       toolsTable =
         '<div class="daily-breakdown"><h3>' + t.toolUsage + '</h3>' +
         '<div class="daily-table-container"><table class="daily-table"><thead><tr>' +
         '<th>' + t.toolUsage + '</th><th>' + t.count + '</th><th>' + t.errors + '</th>' +
-        '<th>' + t.errorRate + '</th><th>' + t.avgDuration + '</th>' +
+        '<th>' + t.errorRate + '</th>' + (hasDurations ? '<th>' + t.avgDuration + '</th>' : '') +
         '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
     }
 
@@ -1608,9 +1611,12 @@ export class UsageWebviewProvider {
     const avgOut = a.assistantTurns > 0 ? Math.round(a.mainOutputTokens / a.assistantTurns) : 0;
     const thinkDen = a.thinkingTokensEst + a.assistantTextTokensEst;
     const thinkShare = thinkDen > 0 ? (a.thinkingTokensEst / thinkDen) * 100 : 0;
+    // Thinking text is redacted in newer Claude Code logs (blocks exist but are
+    // empty) — the share is then unknown, not 0%.
+    const thinkUnknown = a.thinkingTokensEst === 0 && (a.thinkingBlocksSeen || 0) > 0;
     const effCards =
       card(t.avgOutputPerTurn, num(avgOut)) +
-      card(t.thinkingShare, thinkShare.toFixed(0) + '%') +
+      card(t.thinkingShare, thinkUnknown ? 'N/A' : thinkShare.toFixed(0) + '%') +
       (subagentCount > 0 ? card(t.subagentTokens, num(subagentTokens)) : '') +
       (subagentCount > 0 ? card(t.avgSubagentTokens, num(Math.round(subagentTokens / subagentCount))) : '');
     const efficiencySection =
@@ -1931,6 +1937,18 @@ export class UsageWebviewProvider {
         '<span>' + num(h.cacheWastedTokens) + ' · ' + fmtUsd(h.cacheWastedUSD) + '</span></div>' +
         '<div class="ch-rec">' + this.escapeHtml(t.recCacheBust) + '</div>'
       );
+      // Each bust with its likely trigger, so the fix is concrete (older
+      // snapshots may not carry the cacheBusts field yet).
+      const bustCause = (c: string): string =>
+        c === 'ttlExpiry' ? t.bustTtl : c === 'modelSwitch' ? t.bustModelSwitch : c === 'parallel' ? t.bustParallel : t.bustOther;
+      for (const b of (h.cacheBusts || []).slice(0, 5)) {
+        const at = new Date(b.at);
+        const time = isNaN(at.getTime()) ? '' : this.formatDateTime(at);
+        effRows.push(
+          '<div class="ch-winrow ch-muted"><span>· ' + this.escapeHtml(time) + ' — ' + this.escapeHtml(bustCause(b.cause)) + '</span>' +
+          '<span>' + num(b.wastedTokens) + '</span></div>'
+        );
+      }
     }
     effRows.push(
       '<div class="ch-winrow ch-muted"><span>' + t.baseline + '</span><span>' + num(h.baselineTokens) + '</span></div>'
@@ -1947,6 +1965,12 @@ export class UsageWebviewProvider {
     if (h.fullFileReads > 0) {
       effRows.push(
         '<div class="ch-winrow ch-muted"><span>' + t.fullFileReadsLabel + '</span><span>×' + h.fullFileReads + '</span></div>'
+      );
+    }
+    if ((h.largestUserPromptTokens || 0) >= 10000) {
+      effRows.push(
+        '<div class="ch-winrow"><span>' + t.largestPrompt + '</span><span>' + num(h.largestUserPromptTokens) + '</span></div>' +
+        '<div class="ch-rec">' + this.escapeHtml(t.recLargePrompt) + '</div>'
       );
     }
     if (h.errorRateLowCtx >= 0 && h.errorRateHighCtx >= 0) {
@@ -2065,6 +2089,8 @@ export class UsageWebviewProvider {
         return t.sigContextDegradation + ' (' + s.value + '%)';
       case 'repeatedCalls':
         return t.sigRepeatedCalls + ': ' + (s.label || '') + ' ×' + s.value;
+      case 'largeUserPrompt':
+        return t.sigLargeUserPrompt + ' (~' + s.value + 'k)';
       default:
         return '';
     }

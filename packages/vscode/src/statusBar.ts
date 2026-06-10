@@ -309,6 +309,18 @@ export class StatusBarManager {
         return `${t.sigRedundantReads}: ${s.label} ×${s.value}`;
       case 'multiTopic':
         return `${t.sigMultiTopic} (${s.value}m)`;
+      case 'cacheBust':
+        return `${t.sigCacheBust} (×${s.value})`;
+      case 'largeBaseline':
+        return `${t.sigLargeBaseline} (~${s.value}k)`;
+      case 'fullFileReads':
+        return `${t.sigFullFileReads} (×${s.value})`;
+      case 'contextDegradation':
+        return `${t.sigContextDegradation} (${s.value}%)`;
+      case 'repeatedCalls':
+        return `${t.sigRepeatedCalls}: ${s.label} ×${s.value}`;
+      case 'largeUserPrompt':
+        return `${t.sigLargeUserPrompt} (~${s.value}k)`;
       default:
         return '';
     }

@@ -7,6 +7,8 @@ export interface Translations {
     notRunning: string;
     error: string;
     currentSession: string;
+    // Quota-threshold toast. {pct} = current utilisation, {reset} = local reset time.
+    quotaWarning: string;
   };
   contextHealth: {
     title: string;
@@ -36,8 +38,15 @@ export interface Translations {
     sigFullFileReads: string;
     sigContextDegradation: string;
     sigRepeatedCalls: string;
+    sigLargeUserPrompt: string;
     errorByContext: string;
     repeatedCall: string;
+    largestPrompt: string;
+    recLargePrompt: string;
+    bustTtl: string;
+    bustModelSwitch: string;
+    bustParallel: string;
+    bustOther: string;
     efficiency: string;
     cacheWaste: string;
     baseline: string;
@@ -187,6 +196,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code Not Running',
       error: 'Error',
       currentSession: 'Session',
+      quotaWarning: '5-hour quota at {pct}% — resets at {reset}. Consider deferring heavy tasks until after the reset.',
     },
     contextHealth: {
       title: 'Context Health',
@@ -216,8 +226,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigFullFileReads: 'Whole files read without line ranges',
       sigContextDegradation: 'Tool errors rise as the context grows',
       sigRepeatedCalls: 'Same tool call repeated (possible loop)',
+      sigLargeUserPrompt: 'Very large message in context (paste or skill content; stays billable every turn)',
       errorByContext: 'Tool errors low → high context',
       repeatedCall: 'Most-repeated call',
+      largestPrompt: 'Largest prompt',
+      recLargePrompt: 'Pass big files/logs by path and let Claude read them instead of pasting.',
+      bustTtl: 'cache expired (>5m idle)',
+      bustModelSwitch: 'model switch',
+      bustParallel: 'parallel requests (cache not warm yet)',
+      bustOther: 'prefix churn',
       efficiency: 'Token efficiency',
       cacheWaste: 'Cache waste',
       baseline: 'Startup baseline',
@@ -363,6 +380,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: "Claude Code nicht erreichbar",
       error: "Error",
       currentSession: "Session",
+      quotaWarning: "5-Stunden-Kontingent bei {pct}% — Reset um {reset}. Schwere Aufgaben besser auf nach dem Reset verschieben.",
     },
     contextHealth: {
       title: "Kontext-Zustand",
@@ -392,8 +410,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigFullFileReads: "Ganze Dateien ohne Zeilenbereich gelesen",
       sigContextDegradation: "Tool-Fehler nehmen mit wachsendem Kontext zu",
       sigRepeatedCalls: "Gleicher Tool-Aufruf wiederholt (mögliche Schleife)",
+      sigLargeUserPrompt: "Sehr große Nachricht im Kontext (Paste oder Skill-Inhalt; kostet in jedem Folgeturn)",
       errorByContext: "Tool-Fehler bei niedrigem → hohem Kontext",
       repeatedCall: "Häufigster Aufruf",
+      largestPrompt: "Größter Prompt",
+      recLargePrompt: "Große Dateien/Logs per Pfad übergeben und von Claude lesen lassen, statt sie einzufügen.",
+      bustTtl: "Cache abgelaufen (>5 Min. Pause)",
+      bustModelSwitch: "Modellwechsel",
+      bustParallel: "parallele Anfragen (Cache noch kalt)",
+      bustOther: "Präfix-Änderung",
       efficiency: "Token-Effizienz",
       cacheWaste: "Cache-Verschwendung",
       baseline: "Start-Grundlast",
@@ -541,6 +566,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 未執行',
       error: '錯誤',
       currentSession: '當前會話',
+      quotaWarning: '5 小時配額已達 {pct}% — 將於 {reset} 重置。建議將重型任務延後到重置之後。',
     },
     contextHealth: {
       title: '上下文健康度',
@@ -570,8 +596,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigFullFileReads: '未指定行範圍而讀取整個檔案',
       sigContextDegradation: '隨上下文增大，工具錯誤增加',
       sigRepeatedCalls: '同一工具呼叫重複（可能陷入迴圈）',
+      sigLargeUserPrompt: '上下文中有超大訊息（貼入內容或技能正文；之後每一輪都持續計費）',
       errorByContext: '工具錯誤：低 → 高上下文',
       repeatedCall: '重複最多的呼叫',
+      largestPrompt: '最大提示詞',
+      recLargePrompt: '大型檔案／日誌請以路徑傳遞、讓 Claude 自行讀取，不要直接貼入。',
+      bustTtl: '快取過期（閒置超過 5 分鐘）',
+      bustModelSwitch: '切換模型',
+      bustParallel: '並行請求（快取尚未生效）',
+      bustOther: '前綴變動',
       efficiency: 'Token 效率',
       cacheWaste: '快取浪費',
       baseline: '啟動基準量',
@@ -717,6 +750,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 未运行',
       error: '错误',
       currentSession: '当前会话',
+      quotaWarning: '5 小时配额已达 {pct}% — 将于 {reset} 重置。建议将重型任务推迟到重置之后。',
     },
     contextHealth: {
       title: '上下文健康度',
@@ -746,8 +780,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigFullFileReads: '未指定行范围而读取整个文件',
       sigContextDegradation: '随上下文增大，工具错误增加',
       sigRepeatedCalls: '同一工具调用重复（可能陷入循环）',
+      sigLargeUserPrompt: '上下文中有超大消息（粘贴内容或技能正文；之后每一轮都持续计费）',
       errorByContext: '工具错误：低 → 高上下文',
       repeatedCall: '重复最多的调用',
+      largestPrompt: '最大提示词',
+      recLargePrompt: '大型文件／日志请以路径传递、让 Claude 自行读取，不要直接粘贴。',
+      bustTtl: '缓存过期（闲置超过 5 分钟）',
+      bustModelSwitch: '切换模型',
+      bustParallel: '并行请求（缓存尚未生效）',
+      bustOther: '前缀变动',
       efficiency: 'Token 效率',
       cacheWaste: '缓存浪费',
       baseline: '启动基准量',
@@ -893,6 +934,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 未実行',
       error: 'エラー',
       currentSession: '現在のセッション',
+      quotaWarning: '5時間クォータが {pct}% に到達 — {reset} にリセット。重いタスクはリセット後に回すのがおすすめです。',
     },
     contextHealth: {
       title: 'コンテキスト健全度',
@@ -921,8 +963,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigFullFileReads: '行範囲を指定せずファイル全体を読み込み',
       sigContextDegradation: 'コンテキスト増大に伴いツールエラーが増加',
       sigRepeatedCalls: '同じツール呼び出しが繰り返し（ループの可能性）',
+      sigLargeUserPrompt: '巨大なメッセージが常駐（貼り付けまたはスキル本文。以降の全ターンで課金対象に残る）',
       errorByContext: 'ツールエラー: 低→高コンテキスト',
       repeatedCall: '最も繰り返された呼び出し',
+      largestPrompt: '最大プロンプト',
+      recLargePrompt: '大きなファイルやログは貼り付けず、パスを渡して Claude に読ませましょう。',
+      bustTtl: 'キャッシュ期限切れ（5分超のアイドル）',
+      bustModelSwitch: 'モデル切替',
+      bustParallel: '並列リクエスト（キャッシュ未温存）',
+      bustOther: 'プレフィックス変動',
       efficiency: 'トークン効率',
       cacheWaste: 'キャッシュ浪費',
       baseline: '起動ベースライン',
@@ -1069,6 +1118,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 실행되지 않음',
       error: '오류',
       currentSession: '현재 세션',
+      quotaWarning: '5시간 쿼터가 {pct}%에 도달 — {reset}에 리셋됩니다. 무거운 작업은 리셋 후로 미루는 것이 좋습니다.',
     },
     contextHealth: {
       title: '컨텍스트 상태',
@@ -1097,8 +1147,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       sigFullFileReads: '행 범위 없이 파일 전체를 읽음',
       sigContextDegradation: '컨텍스트가 커질수록 도구 오류 증가',
       sigRepeatedCalls: '같은 도구 호출 반복(루프 가능성)',
+      sigLargeUserPrompt: '컨텍스트에 매우 큰 메시지(붙여넣기 또는 스킬 본문; 이후 모든 턴에서 과금 대상으로 유지)',
       errorByContext: '도구 오류: 낮은 → 높은 컨텍스트',
       repeatedCall: '가장 많이 반복된 호출',
+      largestPrompt: '최대 프롬프트',
+      recLargePrompt: '큰 파일/로그는 붙여넣지 말고 경로를 전달해 Claude가 직접 읽게 하세요.',
+      bustTtl: '캐시 만료(5분 초과 유휴)',
+      bustModelSwitch: '모델 전환',
+      bustParallel: '병렬 요청(캐시 미예열)',
+      bustOther: '프리픽스 변경',
       efficiency: '토큰 효율',
       cacheWaste: '캐시 낭비',
       baseline: '시작 베이스라인',

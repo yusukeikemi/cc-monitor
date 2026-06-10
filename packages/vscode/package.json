@@ -107,6 +107,11 @@
           "default": false,
           "description": "Pop a one-time notification when the active session first shows 'context rot'. Debounced to at most once per session (re-armed after a 30-minute quiet gap). Requires enableContextHealth."
         },
+        "claudeCodeUsage.quotaThresholdNotification": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pop a warning when the 5-hour quota crosses 80% (and again at 95%), so heavy tasks can be paused or deferred before the window is exhausted. Re-armed when the quota resets. Requires usageLimitTracking."
+        },
         "claudeCodeUsage.exportInsights": {
           "type": "boolean",
           "default": true,
