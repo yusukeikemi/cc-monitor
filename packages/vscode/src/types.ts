@@ -17,6 +17,10 @@ export interface ClaudeUsageRecord {
   // --- Fields populated by the loader from each record's source .jsonl file ---
   // (a single .jsonl file == a single Claude Code conversation/session)
   _sessionId?: string;
+  // Encoded folder name under <claudeDir>/projects/ that holds the source
+  // .jsonl — needed to re-open the file (_projectPath holds the real cwd,
+  // which is NOT the on-disk folder name).
+  _logDir?: string;
   _projectName?: string;
   _projectPath?: string;
   _gitBranch?: string;

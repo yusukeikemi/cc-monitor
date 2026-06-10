@@ -723,6 +723,7 @@ export class ClaudeDataLoader {
               // over the lossy, dash-encoded folder name when it is available.
               const record = data as ClaudeUsageRecord;
               record._sessionId = sessionInfo.sessionId;
+              record._logDir = sessionInfo.projectPath;
               const cwd = (parsed as { cwd?: unknown }).cwd;
               if (typeof cwd === 'string' && cwd.trim() !== '') {
                 record._projectPath = cwd;
@@ -832,11 +833,14 @@ export class ClaudeDataLoader {
         latest = r;
       }
     }
-    if (!latest || !latest._sessionId || !latest._projectPath) {
+    // The on-disk folder is the encoded _logDir; _projectPath holds the real
+    // cwd and would produce an invalid path under projects/.
+    const logDir = latest ? latest._logDir || latest._projectPath : undefined;
+    if (!latest || !latest._sessionId || !logDir) {
       return null;
     }
 
-    const filePath = path.join(dataDirectory, CLAUDE_PROJECTS_DIR_NAME, latest._projectPath, `${latest._sessionId}.jsonl`);
+    const filePath = path.join(dataDirectory, CLAUDE_PROJECTS_DIR_NAME, logDir, `${latest._sessionId}.jsonl`);
     let fileContent: string;
     try {
       fileContent = await readFile(filePath, 'utf-8');
@@ -976,7 +980,9 @@ export class ClaudeDataLoader {
     const topToolResults = analysis.toolResultBreakdown.slice(0, 3);
     const contentTotal = analysis.totalEstimatedTokens || 1;
 
-    const contextLimit = getModelContextLimit(model);
+    // The observed peak is a lower bound on the real window — protects against
+    // unknown/newer models whose table entry is too small (fill% would exceed 100).
+    const contextLimit = Math.max(getModelContextLimit(model), peakContextTokens);
     const fillRatio = contextLimit > 0 ? contextTokens / contextLimit : 0;
 
     // --- Heuristic rot signals (offline only) ---

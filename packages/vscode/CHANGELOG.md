@@ -24,6 +24,23 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
     and improvement suggestions, fed by the deterministic
     `scripts/extract-session.mjs` extractor (zero-dep, read-only).
 
+### Fixed
+
+- **Context Health silently broken when logs carry `cwd`** (i.e. always, on
+  current Claude Code): `getContextHealth` joined the record's real working
+  directory under `~/.claude/projects/`, producing an invalid path, so the
+  indicator/tab/snapshot returned null. Records now carry the encoded on-disk
+  log folder (`_logDir`) and the lookup uses it. Surfaced by the insights
+  snapshot verification.
+- **Claude Fable 5 pricing**: was falling back to Sonnet rates ($3/$15);
+  added the real tier ($10/$50, cache write $12.50, cache read $1.00 per
+  MTok) plus a `fable` family fallback. Historical cost figures for Fable
+  sessions were under-reported ~3.3x and will correct on next refresh.
+- **1M context windows**: Fable 5, Opus 4.6/4.7/4.8 and Sonnet 4.6 now use a
+  1,000,000-token window for the Context Health fill ratio (previously all
+  Claude models were assumed 200K, producing >100% fill). The observed peak
+  also clamps the limit as a lower bound for unknown models.
+
 ## [2.0.0] — 2026-05-26
 
 ### Removed (vendoring security audit)
