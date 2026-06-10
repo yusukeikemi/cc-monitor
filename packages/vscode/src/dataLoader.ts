@@ -4,13 +4,15 @@ import * as os from 'os';
 import * as path from 'path';
 // Removed tinyglobby dependency - using native fs instead
 // Removed zod dependency - using native validation instead
-import { calculateCostBreakdown } from './pricing';
+import { calculateCostBreakdown, getModelContextLimit, getModelPricing } from './pricing';
 import {
   ActivityAnalysis,
   BranchUsage,
   ClaudeUsageRecord,
   ContentAnalysis,
   ContentSlice,
+  ContextHealth,
+  ContextRotSignal,
   ProjectGroup,
   ProjectUsage,
   SessionData,
@@ -138,6 +140,7 @@ interface AnalysisAcc {
   gitOperations: number;
   mainOutputTokens: number;
   sidechainOutputTokens: number;
+  assistantTurns: number; // billable main-thread assistant turns
   heatmap: number[][];
   titlesBySession: Map<string, string>;
   windowDays: number;
@@ -168,6 +171,7 @@ function newAnalysisAcc(cutoffMs: number, windowDays: number): AnalysisAcc {
     gitOperations: 0,
     mainOutputTokens: 0,
     sidechainOutputTokens: 0,
+    assistantTurns: 0,
     heatmap: Array.from({ length: 7 }, () => new Array<number>(24).fill(0)),
     titlesBySession: new Map<string, string>(),
     windowDays,
@@ -224,6 +228,34 @@ function blockText(content: unknown): string {
   return '';
 }
 
+// Rough estimate of the tokens a single message contributes (text + thinking +
+// tool calls + tool results), for per-topic sizing in the Context Health view.
+function estimateMessageTokens(message: any): number {
+  const content = message?.content;
+  if (typeof content === 'string') {
+    return estimateTokens(content);
+  }
+  if (!Array.isArray(content)) {
+    return 0;
+  }
+  let n = 0;
+  for (const b of content) {
+    if (!b || typeof b !== 'object') {
+      continue;
+    }
+    if (typeof b.text === 'string') {
+      n += estimateTokens(b.text);
+    } else if (typeof b.thinking === 'string') {
+      n += estimateTokens(b.thinking);
+    } else if (b.type === 'tool_result') {
+      n += estimateTokens(blockText(b.content));
+    } else if (b.type === 'tool_use') {
+      n += estimateTokens(JSON.stringify(b.input || {}));
+    }
+  }
+  return n;
+}
+
 function addToBucket(map: Record<string, AnalysisBucket>, key: string, text: string): void {
   if (!text) {
     return;
@@ -259,6 +291,35 @@ function skillNameFromInput(input: unknown): string {
     }
   }
   return 'unknown';
+}
+
+// Build a stable key identifying a tool call by its primary argument, so that
+// identical repeated calls (a loop) collapse to the same key. Keyed by the
+// tool name plus the salient input (command / pattern / path). Returns '' when
+// there's no meaningful argument to key on.
+function repeatedCallKey(name: string, input: Record<string, unknown>): string {
+  const pick = (k: string): string => (typeof input[k] === 'string' ? (input[k] as string) : '');
+  let arg = '';
+  switch (name) {
+    case 'Bash':
+      arg = pick('command');
+      break;
+    case 'Grep':
+    case 'Glob':
+      arg = pick('pattern');
+      break;
+    default:
+      arg = pick('file_path') || pick('path') || pick('query') || pick('prompt');
+      if (!arg) {
+        try {
+          arg = JSON.stringify(input).slice(0, 200);
+        } catch {
+          arg = '';
+        }
+      }
+  }
+  arg = arg.trim();
+  return arg ? name + ' ' + arg : '';
 }
 
 // Count added/removed lines from an Edit result's structured patch.
@@ -382,6 +443,7 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
         acc.sidechainOutputTokens += usage.output_tokens;
       } else {
         acc.mainOutputTokens += usage.output_tokens;
+        acc.assistantTurns++;
       }
     }
     // Activity heatmap: one assistant turn per local weekday/hour cell.
@@ -530,6 +592,9 @@ function finalizeActivity(acc: AnalysisAcc): ActivityAnalysis {
     gitOperations: acc.gitOperations,
     mainOutputTokens: acc.mainOutputTokens,
     sidechainOutputTokens: acc.sidechainOutputTokens,
+    assistantTurns: acc.assistantTurns,
+    thinkingTokensEst: acc.cat['assistantThinking']?.tokens || 0,
+    assistantTextTokensEst: acc.cat['assistantText']?.tokens || 0,
     heatmap: acc.heatmap,
     recentTitles,
   };
@@ -734,6 +799,423 @@ export class ClaudeDataLoader {
   private static recordContextTokens(record: ClaudeUsageRecord): number {
     const usage = record.message.usage;
     return (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+  }
+
+  /**
+   * Live "Context Health" for the currently-active session (the conversation
+   * holding the most recent record). Re-reads that single .jsonl and derives,
+   * with offline heuristics only, how full the context window is, what is
+   * filling it, and whether it shows signs of "context rot". Returns null when
+   * there is no active session or its file can't be read.
+   */
+  static async getContextHealth(
+    records: ClaudeUsageRecord[],
+    dataDirectory: string,
+    sessionId?: string
+  ): Promise<ContextHealth | null> {
+    if (!records || records.length === 0) {
+      return null;
+    }
+
+    // Target a specific session when asked (Sessions-tab drill-down); otherwise
+    // the active session = the one holding the most recent record.
+    const pool = sessionId ? records.filter((r) => r._sessionId === sessionId) : records;
+    if (pool.length === 0) {
+      return null;
+    }
+    let latest: ClaudeUsageRecord | null = null;
+    let latestMs = -Infinity;
+    for (const r of pool) {
+      const ms = new Date(r.timestamp).getTime();
+      if (!isNaN(ms) && ms > latestMs) {
+        latestMs = ms;
+        latest = r;
+      }
+    }
+    if (!latest || !latest._sessionId || !latest._projectPath) {
+      return null;
+    }
+
+    const filePath = path.join(dataDirectory, CLAUDE_PROJECTS_DIR_NAME, latest._projectPath, `${latest._sessionId}.jsonl`);
+    let fileContent: string;
+    try {
+      fileContent = await readFile(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+
+    const TOPIC_GAP_MIN = 45;
+    const acc = newAnalysisAcc(0, 0); // analyse the whole session (no time cutoff)
+    let contextTokens = 0; // window size of the most recent assistant request
+    let peakContextTokens = 0;
+    let model = latest.message.model || '';
+    let lastAssistantMs = -Infinity;
+    const readCounts: Record<string, number> = {};
+    // Per-assistant-turn cache usage (time-ordered) for cache-bust detection.
+    const turns: { ts: number; read: number; create: number; input: number; model: string }[] = [];
+    let sumRead = 0, sumCreate = 0, sumInput = 0; // session totals for the cache hit rate
+    const toolResultSizes: number[] = []; // estimated tokens of each individual tool_result
+    let fullFileReads = 0; // Read calls with no offset/limit (whole-file dumps)
+    let currentCtx = 0; // running context size (latest assistant turn so far)
+    const toolEvents: { ctx: number; error: boolean }[] = []; // per tool_result, for #4
+    const callCounts: Record<string, number> = {}; // identical non-Read tool calls, for #7
+    const ctxSeries: { ts: number; ctx: number }[] = []; // context size per assistant turn
+    const lineEst: { ts: number; est: number }[] = []; // per-message token estimate (any role)
+    const promptTexts: { ts: number; text: string }[] = []; // real user prompts (for topics)
+
+    for (const line of fileContent.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed === '') {
+        continue;
+      }
+      let parsed: any;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      // Reuse the shared analyser for per-category composition + tool-result sizes.
+      analyzeLine(parsed, acc);
+
+      const message = parsed.message;
+      if (!message || typeof message !== 'object') {
+        continue;
+      }
+      const role = message.role || parsed.type;
+      const tsMs = typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;
+
+      if (!isNaN(tsMs)) {
+        const est = estimateMessageTokens(message);
+        if (est > 0) {
+          lineEst.push({ ts: tsMs, est });
+        }
+      }
+
+      // Size each individual tool_result (for reclaimable-output detection).
+      if (Array.isArray(message.content)) {
+        for (const block of message.content) {
+          if (block && block.type === 'tool_result') {
+            const sz = estimateTokens(blockText(block.content));
+            if (sz > 0) {
+              toolResultSizes.push(sz);
+            }
+            toolEvents.push({ ctx: currentCtx, error: block.is_error === true });
+          }
+        }
+      }
+
+      if (role === 'assistant' && message.usage) {
+        const ctx = this.recordContextTokens({ message } as ClaudeUsageRecord);
+        peakContextTokens = Math.max(peakContextTokens, ctx);
+        currentCtx = ctx;
+        const u = message.usage;
+        const read = u.cache_read_input_tokens || 0;
+        const create = u.cache_creation_input_tokens || 0;
+        const inp = u.input_tokens || 0;
+        sumRead += read;
+        sumCreate += create;
+        sumInput += inp;
+        if (!isNaN(tsMs)) {
+          ctxSeries.push({ ts: tsMs, ctx });
+          turns.push({ ts: tsMs, read, create, input: inp, model: typeof message.model === 'string' ? message.model : model });
+        }
+        if (!isNaN(tsMs) && tsMs >= lastAssistantMs) {
+          lastAssistantMs = tsMs;
+          contextTokens = ctx;
+          if (typeof message.model === 'string') {
+            model = message.model;
+          }
+        }
+        // Count Read file paths (redundant reads) and identical non-Read calls
+        // (looping / snowball detection).
+        if (Array.isArray(message.content)) {
+          for (const block of message.content) {
+            if (!block || block.type !== 'tool_use' || typeof block.name !== 'string') {
+              continue;
+            }
+            const inp2 = block.input && typeof block.input === 'object' ? block.input : {};
+            if (block.name === 'Read') {
+              const fp = typeof inp2.file_path === 'string' ? inp2.file_path : '';
+              if (fp) {
+                readCounts[fp] = (readCounts[fp] || 0) + 1;
+              }
+              // A Read with neither offset nor limit dumps the entire file.
+              if (inp2.offset == null && inp2.limit == null) {
+                fullFileReads++;
+              }
+            } else {
+              const key = repeatedCallKey(block.name, inp2);
+              if (key) {
+                callCounts[key] = (callCounts[key] || 0) + 1;
+              }
+            }
+          }
+        }
+      } else if (role === 'user' && parsed.isMeta !== true && !isNaN(tsMs)) {
+        // Real, human-authored prompts (for topic-gap detection + topic labels).
+        const c = message.content;
+        let pText = '';
+        if (typeof c === 'string') {
+          pText = c;
+        } else if (Array.isArray(c)) {
+          const tb = c.find((b: any) => b && b.type === 'text' && typeof b.text === 'string');
+          pText = tb ? tb.text : '';
+        }
+        if (pText.trim().length >= 4) {
+          promptTexts.push({ ts: tsMs, text: pText.trim().slice(0, 60) });
+        }
+      }
+    }
+
+    if (contextTokens === 0 && peakContextTokens === 0) {
+      return null; // no billable assistant turns yet
+    }
+
+    const analysis = finalizeAnalysis(acc);
+    const composition = analysis.categories;
+    const topToolResults = analysis.toolResultBreakdown.slice(0, 3);
+    const contentTotal = analysis.totalEstimatedTokens || 1;
+
+    const contextLimit = getModelContextLimit(model);
+    const fillRatio = contextLimit > 0 ? contextTokens / contextLimit : 0;
+
+    // --- Heuristic rot signals (offline only) ---
+    const signals: ContextRotSignal[] = [];
+
+    if (fillRatio >= 0.85) {
+      signals.push({ kind: 'nearLimit', value: Math.round(fillRatio * 100) });
+    }
+
+    // Largest single tool-result contributor dominating the context.
+    const topTool = analysis.toolResultBreakdown[0];
+    if (topTool) {
+      const share = topTool.estimatedTokens / contentTotal;
+      if (share >= 0.35 && topTool.estimatedTokens > 5000) {
+        signals.push({ kind: 'largeToolResult', label: topTool.key, value: Math.round(share * 100) });
+      }
+    }
+
+    // Carried-over / stale: window large, dominated by tool results + thinking,
+    // very little fresh user input.
+    const byKey = (k: string): number => composition.find((c) => c.key === k)?.estimatedTokens || 0;
+    const staleTokens = byKey('toolResults') + byKey('assistantThinking');
+    const promptTokens = byKey('userPrompts');
+    if (fillRatio >= 0.6 && staleTokens / contentTotal >= 0.6 && promptTokens / contentTotal <= 0.1) {
+      signals.push({ kind: 'staleContext', value: Math.round((staleTokens / contentTotal) * 100) });
+    }
+
+    // Redundant file re-reads.
+    let maxReads = 0;
+    let maxReadFile = '';
+    for (const [fp, n] of Object.entries(readCounts)) {
+      if (n > maxReads) {
+        maxReads = n;
+        maxReadFile = fp;
+      }
+    }
+    if (maxReads >= 3) {
+      signals.push({ kind: 'redundantReads', label: this.lastPathSegment(maxReadFile), value: maxReads });
+    }
+
+    // Split the session into topics at large prompt gaps, and find the single
+    // largest gap as the candidate topic-switch point.
+    const proms = promptTexts.slice().sort((a, b) => a.ts - b.ts);
+    let topicSwitchAt: string | undefined;
+    let topicSwitchGapMin: number | undefined;
+    let maxGapMs = 0;
+    let gapAtMs = 0;
+    const segments: { start: number; end: number; label: string }[] = [];
+    if (proms.length > 0) {
+      let segStart = proms[0].ts;
+      let segLabel = proms[0].text;
+      for (let i = 1; i < proms.length; i++) {
+        const gap = proms[i].ts - proms[i - 1].ts;
+        if (gap > maxGapMs) {
+          maxGapMs = gap;
+          gapAtMs = proms[i].ts;
+        }
+        if (gap >= TOPIC_GAP_MIN * 60_000) {
+          segments.push({ start: segStart, end: proms[i].ts, label: segLabel });
+          segStart = proms[i].ts;
+          segLabel = proms[i].text;
+        }
+      }
+      segments.push({ start: segStart, end: Infinity, label: segLabel });
+    }
+    if (maxGapMs >= TOPIC_GAP_MIN * 60_000) {
+      topicSwitchGapMin = Math.round(maxGapMs / 60_000);
+      topicSwitchAt = new Date(gapAtMs).toISOString();
+      signals.push({ kind: 'multiTopic', value: topicSwitchGapMin });
+    }
+
+    const topics = segments
+      .map((s) => ({
+        label: s.label,
+        estimatedTokens: lineEst.filter((l) => l.ts >= s.start && l.ts < s.end).reduce((n, l) => n + l.est, 0),
+        startTime: new Date(s.start).toISOString(),
+      }))
+      .sort((a, b) => b.estimatedTokens - a.estimatedTokens);
+
+    // Down-sampled context-growth series (oldest→newest) for the sparkline.
+    ctxSeries.sort((a, b) => a.ts - b.ts);
+    const rawSeries = ctxSeries.map((p) => p.ctx);
+    const MAX_POINTS = 24;
+    let contextSeries = rawSeries;
+    if (rawSeries.length > MAX_POINTS) {
+      contextSeries = [];
+      const step = (rawSeries.length - 1) / (MAX_POINTS - 1);
+      for (let i = 0; i < MAX_POINTS; i++) {
+        contextSeries.push(rawSeries[Math.round(i * step)]);
+      }
+    }
+
+    // Recent growth rate + a rough ETA to the model limit at that pace.
+    let growthTokensPerMin: number | undefined;
+    let etaToLimitMin: number | undefined;
+    if (ctxSeries.length >= 2) {
+      const last = ctxSeries[ctxSeries.length - 1];
+      const ref = ctxSeries[Math.max(0, ctxSeries.length - 6)];
+      const dtMin = (last.ts - ref.ts) / 60_000;
+      if (dtMin > 0) {
+        const rate = (last.ctx - ref.ctx) / dtMin;
+        if (rate > 0) {
+          growthTokensPerMin = Math.round(rate);
+          const remaining = contextLimit - last.ctx;
+          if (remaining > 0) {
+            etaToLimitMin = Math.max(1, Math.round(remaining / rate));
+          }
+        }
+      }
+    }
+
+    // --- Token-efficiency metrics (offline, from usage fields + tool blocks) ---
+    // Cache hit rate: share of input-side tokens served cheaply from cache.
+    const cacheInputSide = sumRead + sumCreate + sumInput;
+    const cacheHitRate = cacheInputSide > 0 ? (sumRead / cacheInputSide) * 100 : 0;
+
+    // Cache-bust detection: a turn that re-writes a large prefix which the
+    // previous turn already had cached (read collapses while creation spikes) —
+    // e.g. a mid-session model switch or system/tool churn. Those re-writes pay
+    // the 1.25x write rate instead of the 0.1x read rate.
+    const CACHE_PREFIX_MIN = 4096;
+    turns.sort((a, b) => a.ts - b.ts);
+    let cacheBustCount = 0;
+    let cacheWastedTokens = 0;
+    for (let i = 1; i < turns.length; i++) {
+      const prev = turns[i - 1];
+      const cur = turns[i];
+      const prevCached = prev.read + prev.create;
+      if (prevCached >= CACHE_PREFIX_MIN && cur.read < prevCached * 0.5 && cur.create >= CACHE_PREFIX_MIN) {
+        cacheBustCount++;
+        cacheWastedTokens += cur.create;
+      }
+    }
+    const pricing = getModelPricing(model);
+    const cacheWastedUSD = pricing
+      ? Math.max(0, cacheWastedTokens * ((pricing.cache_creation_input_token_cost || 0) - (pricing.cache_read_input_token_cost || 0)))
+      : 0;
+
+    // Startup baseline: the first request's written/processed prefix (system
+    // prompt + tool schemas + CLAUDE.md), present every session regardless of work.
+    const firstTurn = turns.length > 0 ? turns[0] : null;
+    const baselineTokens = firstTurn ? (firstTurn.create > 0 ? firstTurn.create : firstTurn.input) : 0;
+
+    // Reclaimable tool output: tokens in oversized individual results beyond a cap.
+    const TOOL_RESULT_CAP = 8000;
+    let reclaimableTokens = 0;
+    for (const sz of toolResultSizes) {
+      if (sz > TOOL_RESULT_CAP) {
+        reclaimableTokens += sz - TOOL_RESULT_CAP;
+      }
+    }
+
+    // Quality-aware context-rot: compare tool-error rate in the lower vs upper
+    // half of the window (a local proxy for length-driven degradation). is_error
+    // also captures user rejections, so treat the rates as a rough signal.
+    const splitCtx = contextLimit * 0.5;
+    let loTotal = 0, loErr = 0, hiTotal = 0, hiErr = 0;
+    for (const ev of toolEvents) {
+      if (ev.ctx <= 0) {
+        continue;
+      }
+      if (ev.ctx < splitCtx) {
+        loTotal++;
+        if (ev.error) loErr++;
+      } else {
+        hiTotal++;
+        if (ev.error) hiErr++;
+      }
+    }
+    const errorRateLowCtx = loTotal >= 5 ? (loErr / loTotal) * 100 : -1;
+    const errorRateHighCtx = hiTotal >= 5 ? (hiErr / hiTotal) * 100 : -1;
+
+    // Snowball / looping: the most-repeated identical non-Read tool call.
+    let maxRepeatedCall = 0;
+    let maxRepeatedCallKeyStr = '';
+    for (const [k, n] of Object.entries(callCounts)) {
+      if (n > maxRepeatedCall) {
+        maxRepeatedCall = n;
+        maxRepeatedCallKeyStr = k;
+      }
+    }
+    const maxRepeatedCallLabel = maxRepeatedCallKeyStr.split(' ')[0] || '';
+
+    if (cacheWastedTokens >= 20000) {
+      signals.push({ kind: 'cacheBust', value: cacheBustCount });
+    }
+    if (baselineTokens >= 25000) {
+      signals.push({ kind: 'largeBaseline', value: Math.round(baselineTokens / 1000) });
+    }
+    if (fullFileReads >= 5) {
+      signals.push({ kind: 'fullFileReads', value: fullFileReads });
+    }
+    if (errorRateLowCtx >= 0 && errorRateHighCtx >= 0 && errorRateHighCtx >= Math.max(10, errorRateLowCtx * 1.5)) {
+      signals.push({ kind: 'contextDegradation', value: Math.round(errorRateHighCtx) });
+    }
+    if (maxRepeatedCall >= 4) {
+      signals.push({ kind: 'repeatedCalls', label: maxRepeatedCallLabel, value: maxRepeatedCall });
+    }
+
+    // --- Overall status ---
+    const hasLarge = signals.some((s) => s.kind === 'largeToolResult');
+    const hasMulti = signals.some((s) => s.kind === 'multiTopic');
+    let status: ContextHealth['status'] = 'healthy';
+    if (fillRatio >= 0.85 || hasLarge || (hasMulti && fillRatio >= 0.6)) {
+      status = 'rot';
+    } else if (fillRatio >= 0.6 || signals.length > 0) {
+      status = 'watch';
+    }
+
+    return {
+      sessionId: latest._sessionId,
+      projectName: latest._projectName || 'unknown',
+      model,
+      contextTokens,
+      peakContextTokens,
+      contextLimit,
+      fillRatio,
+      composition,
+      topToolResults,
+      signals,
+      cacheHitRate,
+      cacheBustCount,
+      cacheWastedTokens,
+      cacheWastedUSD,
+      baselineTokens,
+      reclaimableTokens,
+      fullFileReads,
+      errorRateLowCtx,
+      errorRateHighCtx,
+      maxRepeatedCall,
+      maxRepeatedCallLabel,
+      status,
+      contextSeries,
+      growthTokensPerMin,
+      etaToLimitMin,
+      topics,
+      topicSwitchAt,
+      topicSwitchGapMin,
+    };
   }
 
   private static async getEarliestTimestamp(filePath: string): Promise<Date | null> {

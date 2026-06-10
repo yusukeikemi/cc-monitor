@@ -8,6 +8,47 @@ export interface Translations {
     error: string;
     currentSession: string;
   };
+  contextHealth: {
+    title: string;
+    windowSize: string;
+    composition: string;
+    topicSwitch: string;
+    growth: string;
+    pace: string;
+    etaToLimit: string;
+    topics: string;
+    signalsTitle: string;
+    peak: string;
+    inspect: string;
+    viewing: string;
+    backToActive: string;
+    notifyRot: string;
+    statusHealthy: string;
+    statusWatch: string;
+    statusRot: string;
+    sigNearLimit: string;
+    sigLargeToolResult: string;
+    sigStaleContext: string;
+    sigRedundantReads: string;
+    sigMultiTopic: string;
+    sigCacheBust: string;
+    sigLargeBaseline: string;
+    sigFullFileReads: string;
+    sigContextDegradation: string;
+    sigRepeatedCalls: string;
+    errorByContext: string;
+    repeatedCall: string;
+    efficiency: string;
+    cacheWaste: string;
+    baseline: string;
+    reclaimable: string;
+    fullFileReadsLabel: string;
+    recCacheBust: string;
+    recBaseline: string;
+    recReclaim: string;
+    suggestClear: string;
+    suggestHealthy: string;
+  };
   popup: {
     title: string;
     currentSession: string;
@@ -109,6 +150,12 @@ export interface Translations {
     tokenSplit: string;
     mainThread: string;
     subagentsLabel: string;
+    efficiencyTitle: string;
+    avgOutputPerTurn: string;
+    thinkingShare: string;
+    subagentTokens: string;
+    avgSubagentTokens: string;
+    efficiencyNote: string;
     activityHeatmap: string;
     heatmapHint: string;
     recentTopics: string;
@@ -140,6 +187,47 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code Not Running',
       error: 'Error',
       currentSession: 'Session',
+    },
+    contextHealth: {
+      title: 'Context Health',
+      windowSize: 'Window',
+      composition: "What's in context",
+      topicSwitch: 'Topic-switch point',
+      growth: 'Growth',
+      pace: 'Pace',
+      etaToLimit: 'to limit',
+      topics: 'Topics',
+      signalsTitle: 'Signals',
+      peak: 'Peak',
+      inspect: 'Inspect',
+      viewing: 'Viewing session',
+      backToActive: 'Back to active',
+      notifyRot: 'Context is getting bloated — consider /clear to start a fresh topic.',
+      statusHealthy: 'Healthy',
+      statusWatch: 'Getting heavy',
+      statusRot: 'Bloated',
+      sigNearLimit: 'Context near the model limit',
+      sigLargeToolResult: 'A large tool result dominates the context',
+      sigStaleContext: 'Mostly carried-over old content',
+      sigRedundantReads: 'Same file re-read repeatedly',
+      sigMultiTopic: 'Multiple topics in one session',
+      sigCacheBust: 'Cache repeatedly invalidated (costly re-writes)',
+      sigLargeBaseline: 'Large startup context (system prompt / CLAUDE.md / tools)',
+      sigFullFileReads: 'Whole files read without line ranges',
+      sigContextDegradation: 'Tool errors rise as the context grows',
+      sigRepeatedCalls: 'Same tool call repeated (possible loop)',
+      errorByContext: 'Tool errors low → high context',
+      repeatedCall: 'Most-repeated call',
+      efficiency: 'Token efficiency',
+      cacheWaste: 'Cache waste',
+      baseline: 'Startup baseline',
+      reclaimable: 'Reclaimable tool output',
+      fullFileReadsLabel: 'Whole-file reads',
+      recCacheBust: 'Avoid switching models mid-session to keep the cache warm.',
+      recBaseline: 'Trim CLAUDE.md (<200 lines) and disable unused MCP servers.',
+      recReclaim: 'Large tool outputs — prefer targeted reads and truncation.',
+      suggestClear: 'Consider /clear to start a fresh topic.',
+      suggestHealthy: 'Context looks healthy.',
     },
     popup: {
       title: 'Claude Code Usage',
@@ -241,6 +329,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: 'Main vs Subagent (output tokens)',
       mainThread: 'Main thread',
       subagentsLabel: 'Subagents',
+      efficiencyTitle: 'Token efficiency',
+      avgOutputPerTurn: 'Avg output / turn',
+      thinkingShare: 'Thinking share',
+      subagentTokens: 'Subagent tokens',
+      avgSubagentTokens: 'Avg tokens / subagent',
+      efficiencyNote: 'Subagents multiply token spend (multi-agent runs ~15×, agent teams ~7×) — worth it only for high-value work. Thinking tokens are billed as output.',
       activityHeatmap: 'Activity Heatmap',
       heatmapHint: 'Assistant turns by weekday and hour',
       recentTopics: 'Recent Session Topics',
@@ -269,6 +363,47 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: "Claude Code nicht erreichbar",
       error: "Error",
       currentSession: "Session",
+    },
+    contextHealth: {
+      title: "Kontext-Zustand",
+      windowSize: "Fenster",
+      composition: "Was im Kontext ist",
+      topicSwitch: "Themenwechsel-Punkt",
+      growth: "Wachstum",
+      pace: "Tempo",
+      etaToLimit: "bis Limit",
+      topics: "Themen",
+      signalsTitle: "Signale",
+      peak: "Spitze",
+      inspect: "Prüfen",
+      viewing: "Sitzung",
+      backToActive: "Zur aktiven",
+      notifyRot: "Der Kontext wird überladen — mit /clear ein neues Thema beginnen.",
+      statusHealthy: "Gesund",
+      statusWatch: "Wird voll",
+      statusRot: "Überladen",
+      sigNearLimit: "Kontext nahe am Modell-Limit",
+      sigLargeToolResult: "Ein großes Tool-Ergebnis dominiert den Kontext",
+      sigStaleContext: "Überwiegend übernommener alter Inhalt",
+      sigRedundantReads: "Dieselbe Datei mehrfach gelesen",
+      sigMultiTopic: "Mehrere Themen in einer Sitzung",
+      sigCacheBust: "Cache wiederholt verworfen (teure Neuschreibungen)",
+      sigLargeBaseline: "Großer Startkontext (System-Prompt / CLAUDE.md / Tools)",
+      sigFullFileReads: "Ganze Dateien ohne Zeilenbereich gelesen",
+      sigContextDegradation: "Tool-Fehler nehmen mit wachsendem Kontext zu",
+      sigRepeatedCalls: "Gleicher Tool-Aufruf wiederholt (mögliche Schleife)",
+      errorByContext: "Tool-Fehler bei niedrigem → hohem Kontext",
+      repeatedCall: "Häufigster Aufruf",
+      efficiency: "Token-Effizienz",
+      cacheWaste: "Cache-Verschwendung",
+      baseline: "Start-Grundlast",
+      reclaimable: "Rückgewinnbare Tool-Ausgabe",
+      fullFileReadsLabel: "Ganzdatei-Lesevorgänge",
+      recCacheBust: "Modellwechsel mitten in der Sitzung vermeiden, um den Cache warm zu halten.",
+      recBaseline: "CLAUDE.md kürzen (<200 Zeilen) und ungenutzte MCP-Server deaktivieren.",
+      recReclaim: "Große Tool-Ausgaben — gezielte Reads und Kürzung bevorzugen.",
+      suggestClear: "Mit /clear ein neues Thema beginnen.",
+      suggestHealthy: "Kontext sieht gesund aus.",
     },
     popup: {
       title: "Claude Code Nutzung",
@@ -372,6 +507,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: "Haupt vs. Subagent (Ausgabe-Token)",
       mainThread: "Hauptthread",
       subagentsLabel: "Subagenten",
+      efficiencyTitle: "Token-Effizienz",
+      avgOutputPerTurn: "Ø Ausgabe / Zug",
+      thinkingShare: "Thinking-Anteil",
+      subagentTokens: "Subagent-Token",
+      avgSubagentTokens: "Ø Token / Subagent",
+      efficiencyNote: "Subagenten vervielfachen den Token-Verbrauch (Multi-Agent ~15×, Agent-Teams ~7×) — nur für hochwertige Arbeit lohnend. Thinking-Token werden als Ausgabe abgerechnet.",
       activityHeatmap: "Aktivitäts-Heatmap",
       heatmapHint: "Assistent-Turns nach Wochentag und Stunde",
       recentTopics: "Letzte Sitzungsthemen",
@@ -400,6 +541,47 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 未執行',
       error: '錯誤',
       currentSession: '當前會話',
+    },
+    contextHealth: {
+      title: '上下文健康度',
+      windowSize: '視窗',
+      composition: '上下文內容',
+      topicSwitch: '話題切換點',
+      growth: '成長',
+      pace: '速度',
+      etaToLimit: '距上限',
+      topics: '話題',
+      signalsTitle: '訊號',
+      peak: '峰值',
+      inspect: '深入查看',
+      viewing: '檢視工作階段',
+      backToActive: '返回當前',
+      notifyRot: '上下文正在臃腫 — 建議使用 /clear 開始新話題。',
+      statusHealthy: '健康',
+      statusWatch: '漸趨臃腫',
+      statusRot: '臃腫',
+      sigNearLimit: '上下文接近模型上限',
+      sigLargeToolResult: '單一工具結果佔據大量上下文',
+      sigStaleContext: '多為延續的舊內容',
+      sigRedundantReads: '同一檔案重複讀取',
+      sigMultiTopic: '單一工作階段中有多個話題',
+      sigCacheBust: '快取反覆失效（昂貴的重寫）',
+      sigLargeBaseline: '啟動上下文龐大（系統提示／CLAUDE.md／工具）',
+      sigFullFileReads: '未指定行範圍而讀取整個檔案',
+      sigContextDegradation: '隨上下文增大，工具錯誤增加',
+      sigRepeatedCalls: '同一工具呼叫重複（可能陷入迴圈）',
+      errorByContext: '工具錯誤：低 → 高上下文',
+      repeatedCall: '重複最多的呼叫',
+      efficiency: 'Token 效率',
+      cacheWaste: '快取浪費',
+      baseline: '啟動基準量',
+      reclaimable: '可回收的工具輸出',
+      fullFileReadsLabel: '整檔讀取',
+      recCacheBust: '避免在工作階段中途切換模型，以保持快取有效。',
+      recBaseline: '精簡 CLAUDE.md（<200 行）並停用未使用的 MCP 伺服器。',
+      recReclaim: '工具輸出過大——建議改用精準讀取與截斷。',
+      suggestClear: '建議使用 /clear 開始新話題。',
+      suggestHealthy: '上下文狀態良好。',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -501,6 +683,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: '主執行緒 vs 子代理（輸出 Token）',
       mainThread: '主執行緒',
       subagentsLabel: '子代理',
+      efficiencyTitle: 'Token 效率',
+      avgOutputPerTurn: '平均輸出 / 回合',
+      thinkingShare: '思考佔比',
+      subagentTokens: '子代理 Token',
+      avgSubagentTokens: '平均 Token / 子代理',
+      efficiencyNote: '子代理會成倍消耗 Token（多代理約 15×、代理團隊約 7×），僅在高價值任務才划算。思考 Token 以輸出計費。',
       activityHeatmap: '活動熱圖',
       heatmapHint: '依星期與時段的助手回合數',
       recentTopics: '近期會話主題',
@@ -529,6 +717,47 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 未运行',
       error: '错误',
       currentSession: '当前会话',
+    },
+    contextHealth: {
+      title: '上下文健康度',
+      windowSize: '窗口',
+      composition: '上下文内容',
+      topicSwitch: '话题切换点',
+      growth: '增长',
+      pace: '速度',
+      etaToLimit: '距上限',
+      topics: '话题',
+      signalsTitle: '信号',
+      peak: '峰值',
+      inspect: '深入查看',
+      viewing: '查看会话',
+      backToActive: '返回当前',
+      notifyRot: '上下文正在臃肿 — 建议使用 /clear 开始新话题。',
+      statusHealthy: '健康',
+      statusWatch: '渐趋臃肿',
+      statusRot: '臃肿',
+      sigNearLimit: '上下文接近模型上限',
+      sigLargeToolResult: '单个工具结果占据大量上下文',
+      sigStaleContext: '多为延续的旧内容',
+      sigRedundantReads: '同一文件重复读取',
+      sigMultiTopic: '单个会话中有多个话题',
+      sigCacheBust: '缓存反复失效（代价高昂的重写）',
+      sigLargeBaseline: '启动上下文庞大（系统提示／CLAUDE.md／工具）',
+      sigFullFileReads: '未指定行范围而读取整个文件',
+      sigContextDegradation: '随上下文增大，工具错误增加',
+      sigRepeatedCalls: '同一工具调用重复（可能陷入循环）',
+      errorByContext: '工具错误：低 → 高上下文',
+      repeatedCall: '重复最多的调用',
+      efficiency: 'Token 效率',
+      cacheWaste: '缓存浪费',
+      baseline: '启动基准量',
+      reclaimable: '可回收的工具输出',
+      fullFileReadsLabel: '整文件读取',
+      recCacheBust: '避免在会话中途切换模型，以保持缓存有效。',
+      recBaseline: '精简 CLAUDE.md（<200 行）并停用未使用的 MCP 服务器。',
+      recReclaim: '工具输出过大——建议改用精准读取与截断。',
+      suggestClear: '建议使用 /clear 开始新话题。',
+      suggestHealthy: '上下文状态良好。',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -630,6 +859,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: '主线程 vs 子代理（输出 Token）',
       mainThread: '主线程',
       subagentsLabel: '子代理',
+      efficiencyTitle: 'Token 效率',
+      avgOutputPerTurn: '平均输出 / 回合',
+      thinkingShare: '思考占比',
+      subagentTokens: '子代理 Token',
+      avgSubagentTokens: '平均 Token / 子代理',
+      efficiencyNote: '子代理会成倍消耗 Token（多代理约 15×、代理团队约 7×），仅在高价值任务才划算。思考 Token 以输出计费。',
       activityHeatmap: '活动热图',
       heatmapHint: '按星期与时段的助手回合数',
       recentTopics: '近期会话主题',
@@ -658,6 +893,47 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 未実行',
       error: 'エラー',
       currentSession: '現在のセッション',
+    },
+    contextHealth: {
+      title: 'コンテキスト健全度',
+      windowSize: 'ウィンドウ',
+      composition: 'コンテキストの中身',
+      topicSwitch: '話題の切り替え目安',
+      growth: '成長',
+      pace: 'ペース',
+      etaToLimit: '上限まで',
+      topics: '話題',
+      signalsTitle: '検知信号',
+      peak: 'ピーク',
+      inspect: '深掘り',
+      viewing: '表示中のセッション',
+      backToActive: '現在に戻る',
+      notifyRot: 'コンテキストが肥大化しています — /clear で新しい話題を始めると効果的です。',
+      statusHealthy: '良好',
+      statusWatch: 'やや過多',
+      statusRot: '肥大化',
+      sigNearLimit: 'コンテキストがモデル上限に接近',
+      sigLargeToolResult: '大きなツール結果がコンテキストを占有',
+      sigStaleContext: '古い引き継ぎ内容が大半',
+      sigRedundantReads: '同じファイルを繰り返し読み込み',
+      sigCacheBust: 'キャッシュが繰り返し無効化（高コストな再書き込み）',
+      sigLargeBaseline: '起動コンテキストが大きい（システムプロンプト／CLAUDE.md／ツール）',
+      sigFullFileReads: '行範囲を指定せずファイル全体を読み込み',
+      sigContextDegradation: 'コンテキスト増大に伴いツールエラーが増加',
+      sigRepeatedCalls: '同じツール呼び出しが繰り返し（ループの可能性）',
+      errorByContext: 'ツールエラー: 低→高コンテキスト',
+      repeatedCall: '最も繰り返された呼び出し',
+      efficiency: 'トークン効率',
+      cacheWaste: 'キャッシュ浪費',
+      baseline: '起動ベースライン',
+      reclaimable: '回収可能なツール出力',
+      fullFileReadsLabel: 'ファイル全体の読み込み',
+      recCacheBust: 'キャッシュを維持するため、セッション途中でのモデル切り替えを避けましょう。',
+      recBaseline: 'CLAUDE.md を簡潔に（200行未満）、未使用の MCP サーバーを無効化しましょう。',
+      recReclaim: 'ツール出力が大きすぎます——範囲指定読み込みや切り詰めを推奨します。',
+      sigMultiTopic: '1セッションに複数の話題',
+      suggestClear: '/clear で新しい話題を始めると効果的です。',
+      suggestHealthy: 'コンテキストは良好です。',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -759,6 +1035,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: 'メイン vs サブエージェント（出力トークン）',
       mainThread: 'メインスレッド',
       subagentsLabel: 'サブエージェント',
+      efficiencyTitle: 'トークン効率',
+      avgOutputPerTurn: '平均出力 / ターン',
+      thinkingShare: 'thinking 比率',
+      subagentTokens: 'サブエージェントのトークン',
+      avgSubagentTokens: '平均トークン / サブエージェント',
+      efficiencyNote: 'サブエージェントはトークン消費を増やします（マルチエージェント約15倍、エージェントチーム約7倍）。高価値なタスクでのみ見合います。thinking トークンは出力として課金されます。',
       activityHeatmap: 'アクティビティ ヒートマップ',
       heatmapHint: '曜日×時間帯ごとのアシスタント ターン数',
       recentTopics: '最近のセッション トピック',
@@ -787,6 +1069,47 @@ const translations: Record<SupportedLanguage, Translations> = {
       notRunning: 'Claude Code 실행되지 않음',
       error: '오류',
       currentSession: '현재 세션',
+    },
+    contextHealth: {
+      title: '컨텍스트 상태',
+      windowSize: '윈도우',
+      composition: '컨텍스트 구성',
+      topicSwitch: '주제 전환 지점',
+      growth: '증가',
+      pace: '속도',
+      etaToLimit: '한도까지',
+      topics: '주제',
+      signalsTitle: '시그널',
+      peak: '최대',
+      inspect: '자세히',
+      viewing: '세션 보기',
+      backToActive: '현재로',
+      notifyRot: '컨텍스트가 비대해지고 있습니다 — /clear로 새 주제를 시작하세요.',
+      statusHealthy: '양호',
+      statusWatch: '점점 과다',
+      statusRot: '비대',
+      sigNearLimit: '컨텍스트가 모델 한도에 근접',
+      sigLargeToolResult: '큰 도구 결과가 컨텍스트를 점유',
+      sigStaleContext: '대부분 이어받은 오래된 내용',
+      sigRedundantReads: '같은 파일을 반복해서 읽음',
+      sigCacheBust: '캐시가 반복적으로 무효화됨(비용이 큰 재작성)',
+      sigLargeBaseline: '시작 컨텍스트가 큼(시스템 프롬프트／CLAUDE.md／도구)',
+      sigFullFileReads: '행 범위 없이 파일 전체를 읽음',
+      sigContextDegradation: '컨텍스트가 커질수록 도구 오류 증가',
+      sigRepeatedCalls: '같은 도구 호출 반복(루프 가능성)',
+      errorByContext: '도구 오류: 낮은 → 높은 컨텍스트',
+      repeatedCall: '가장 많이 반복된 호출',
+      efficiency: '토큰 효율',
+      cacheWaste: '캐시 낭비',
+      baseline: '시작 베이스라인',
+      reclaimable: '회수 가능한 도구 출력',
+      fullFileReadsLabel: '파일 전체 읽기',
+      recCacheBust: '캐시를 유지하려면 세션 도중 모델 전환을 피하세요.',
+      recBaseline: 'CLAUDE.md를 간결하게(200줄 미만) 하고 사용하지 않는 MCP 서버를 비활성화하세요.',
+      recReclaim: '도구 출력이 너무 큽니다 — 범위 지정 읽기와 잘라내기를 권장합니다.',
+      sigMultiTopic: '한 세션에 여러 주제',
+      suggestClear: '/clear로 새 주제를 시작하는 것이 좋습니다.',
+      suggestHealthy: '컨텍스트 상태가 양호합니다.',
     },
     popup: {
       title: 'Claude Code 사용량',
@@ -888,6 +1211,12 @@ const translations: Record<SupportedLanguage, Translations> = {
       tokenSplit: '메인 vs 서브에이전트 (출력 토큰)',
       mainThread: '메인 스레드',
       subagentsLabel: '서브에이전트',
+      efficiencyTitle: '토큰 효율',
+      avgOutputPerTurn: '평균 출력 / 턴',
+      thinkingShare: '사고(thinking) 비중',
+      subagentTokens: '서브에이전트 토큰',
+      avgSubagentTokens: '평균 토큰 / 서브에이전트',
+      efficiencyNote: '서브에이전트는 토큰 소비를 배가합니다(멀티에이전트 약 15배, 에이전트 팀 약 7배). 고가치 작업에서만 가치가 있습니다. 사고 토큰은 출력으로 청구됩니다.',
       activityHeatmap: '활동 히트맵',
       heatmapHint: '요일·시간대별 어시스턴트 턴 수',
       recentTopics: '최근 세션 주제',

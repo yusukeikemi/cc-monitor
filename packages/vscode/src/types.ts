@@ -109,6 +109,85 @@ export interface ContentAnalysis {
   recentPrompts: { cwd: string; text: string }[];
 }
 
+// --- Context Health (the live status-bar indicator) ---
+// One heuristic "context rot" signal detected in the active session. All signals
+// are computed offline from the conversation log — no LLM judgement is involved.
+export interface ContextRotSignal {
+  kind:
+    | 'nearLimit'
+    | 'largeToolResult'
+    | 'staleContext'
+    | 'redundantReads'
+    | 'multiTopic'
+    | 'cacheBust'
+    | 'largeBaseline'
+    | 'fullFileReads'
+    | 'contextDegradation'
+    | 'repeatedCalls';
+  // Contextual numbers for the renderer (a percentage, a count, or minutes,
+  // depending on `kind`).
+  value?: number;
+  // Contextual label for the renderer (e.g. a tool name or file name).
+  label?: string;
+}
+
+// Live health of the currently-active session's context window. Estimated
+// offline from the single .jsonl of the most recently updated session.
+export interface ContextHealth {
+  sessionId: string;
+  projectName: string;
+  model: string;
+  contextTokens: number; // current window size (input + cache read + cache write of the latest request)
+  peakContextTokens: number;
+  contextLimit: number; // approximate model context-window size
+  fillRatio: number; // contextTokens / contextLimit (0-1)
+  // Estimated composition of what fills the window (userPrompts, assistantText,
+  // assistantThinking, toolCalls, toolResults), sorted by token share.
+  composition: ContentSlice[];
+  // Largest tool-result contributors (top few).
+  topToolResults: ContentSlice[];
+  signals: ContextRotSignal[];
+  // --- Token-efficiency metrics (session-level, computed offline from the
+  // usage fields and tool blocks; no LLM judgement involved). ---
+  // Share of input-side tokens served cheaply from cache across the session:
+  // Σcache_read / Σ(cache_read + cache_creation + input). 0-100.
+  cacheHitRate: number;
+  // Prefix-break events where an already-cached prefix had to be re-written
+  // (e.g. a mid-session model switch or system/tool churn), and the tokens / $
+  // those costly re-writes wasted versus keeping the cache warm.
+  cacheBustCount: number;
+  cacheWastedTokens: number;
+  cacheWastedUSD: number;
+  // Per-session startup baseline (system prompt + tool schemas + CLAUDE.md),
+  // approximated by the first request's written/processed prefix. A large
+  // baseline is paid on every session regardless of the work.
+  baselineTokens: number;
+  // Tokens reclaimable by truncating oversized individual tool results to a cap.
+  reclaimableTokens: number;
+  // Read tool calls that dumped a whole file (no offset/limit line range).
+  fullFileReads: number;
+  // Quality-aware context-rot proxy: tool-error rate (%) in the lower vs upper
+  // half of the context window — a local stand-in for length-driven
+  // degradation. -1 when there isn't enough sample to compute.
+  errorRateLowCtx: number;
+  errorRateHighCtx: number;
+  // Snowball / looping: the most-repeated identical (non-Read) tool call in the
+  // session, and a readable label (the tool name) for it.
+  maxRepeatedCall: number;
+  maxRepeatedCallLabel: string;
+  status: 'healthy' | 'watch' | 'rot';
+  // Down-sampled context-window sizes over the session, oldest→newest (sparkline).
+  contextSeries: number[];
+  // Recent growth rate and a rough ETA to the model limit at that pace.
+  growthTokensPerMin?: number;
+  etaToLimitMin?: number;
+  // The session split into topics at large prompt gaps, sorted by token weight.
+  topics: { label: string; estimatedTokens: number; startTime: string }[];
+  // Largest gap between consecutive user prompts — a candidate topic-switch point.
+  topicSwitchAt?: string; // ISO timestamp
+  topicSwitchGapMin?: number;
+}
+
 // --- Activity analysis (the "Activity" tab) ---
 // All figures cover the same recent window as the content analysis (last 30
 // days) and are exact counts derived from the raw log — not token estimates.
@@ -164,6 +243,12 @@ export interface ActivityAnalysis {
   // Output-token split between the main thread and subagents (sidechains).
   mainOutputTokens: number;
   sidechainOutputTokens: number;
+  // Verbosity / thinking-budget view: billable main-thread assistant turns, and
+  // estimated thinking vs visible-text tokens the assistant produced (offline
+  // estimate from block text, across main + subagent turns).
+  assistantTurns: number;
+  thinkingTokensEst: number;
+  assistantTextTokensEst: number;
   // 7×24 grid of assistant turns by local weekday (0=Sun) and hour.
   heatmap: number[][];
   // Most recent session titles (auto-generated), newest first.
@@ -189,6 +274,12 @@ export interface ExtensionConfig {
   // Run the (CPU-heavy) content/prompt-token analysis. When false the Content
   // tab is hidden and the analysis is skipped during refresh.
   enableContentAnalysis: boolean;
+  // Show the live Context Health indicator in the status bar. When false the
+  // indicator is hidden and its (per-session) analysis is skipped during refresh.
+  enableContextHealth: boolean;
+  // Pop a one-time (debounced) toast when the active session first turns "rot".
+  // Opt-in (default false). No effect when enableContextHealth is off.
+  contextHealthRotNotification: boolean;
   // How the Projects tab groups working directories:
   //   - 'git'    group by enclosing git repository (default; current behaviour)
   //   - 'folder' group by the heuristic top-level project folder only

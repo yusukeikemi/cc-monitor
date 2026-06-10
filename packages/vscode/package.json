@@ -97,6 +97,16 @@
           "default": true,
           "description": "Run the content/token analysis on conversation logs and show the Content tab. Disable to skip the CPU-heavy text scan during refresh."
         },
+        "claudeCodeUsage.enableContextHealth": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the live Context Health indicator in the status bar. It estimates — offline, from the active session's log — how full the context window is, what is filling it, and whether it shows signs of 'context rot' (a good cue to /clear). Disable to hide it and skip its per-session analysis during refresh."
+        },
+        "claudeCodeUsage.contextHealthRotNotification": {
+          "type": "boolean",
+          "default": false,
+          "description": "Pop a one-time notification when the active session first shows 'context rot'. Debounced to at most once per session (re-armed after a 30-minute quiet gap). Requires enableContextHealth."
+        },
         "claudeCodeUsage.projectGroupingMode": {
           "type": "string",
           "enum": [
