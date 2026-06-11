@@ -331,193 +331,98 @@ export class UsageWebviewProvider {
    * whole document, which used to flash blank on every refresh.
    */
   private getMainContentInner(): string {
-    // Pre-resolve I18n values to avoid template literal issues
-    const title = I18n.t.popup.title;
-    const refresh = I18n.t.popup.refresh;
-    const settings = I18n.t.popup.settings;
-    const today = I18n.t.popup.today;
-    const thisMonth = I18n.t.popup.thisMonth;
-    const allTime = I18n.t.popup.allTime;
-    const sessions = I18n.t.popup.sessions;
-    const projects = I18n.t.popup.projects;
-    const contentTab = I18n.t.popup.contentAnalysis;
-    const branchesTab = I18n.t.popup.branches;
+    const t = I18n.t.popup;
 
-    const todayActive = this.currentTab === 'today' ? 'active' : '';
-    const monthActive = this.currentTab === 'month' ? 'active' : '';
-    const allActive = this.currentTab === 'all' ? 'active' : '';
-    const sessionsActive = this.currentTab === 'sessions' ? 'active' : '';
-    const projectsActive = this.currentTab === 'projects' ? 'active' : '';
-    const contentActive = this.currentTab === 'content' ? 'active' : '';
-    const branchesActive = this.currentTab === 'branches' ? 'active' : '';
-    const activityActive = this.currentTab === 'activity' ? 'active' : '';
-    const quotaActive = this.currentTab === 'quota' ? 'active' : '';
-    const contextHealthActive = this.currentTab === 'contextHealth' ? 'active' : '';
+    // Tabs that no longer exist map onto their new home (persisted state from
+    // an older layout, or features toggled off since the tab was selected).
+    if (this.currentTab === 'branches') {
+      this.currentTab = 'projects';
+    }
+    if (this.currentTab === 'content') {
+      this.currentTab = 'activity';
+    }
+
+    // 'today' | 'month' | 'all' are period views inside the single Usage tab.
+    const isUsage = this.currentTab === 'today' || this.currentTab === 'month' || this.currentTab === 'all';
+    const active = (name: string): string => (this.currentTab === name ? 'active' : '');
 
     // The Context Health tab is shown only when an active session's health was
     // computed (enableContextHealth on, and a current session exists).
     const contextHealthEnabled = this.contextHealth !== null;
     const contextHealthTabButton = contextHealthEnabled
-      ? '<button id="tab-contextHealth" class="tab ' + contextHealthActive +
+      ? '<button id="tab-contextHealth" class="tab ' + active('contextHealth') +
         '" onclick="showTab(\'contextHealth\')">' + I18n.t.contextHealth.title + '</button>'
       : '';
     const contextHealthTabContent = contextHealthEnabled
-      ? '<div id="contextHealth" class="tab-content ' + contextHealthActive + '">' + this.renderContextHealthData() + '</div>'
+      ? '<div id="contextHealth" class="tab-content ' + active('contextHealth') + '">' + this.renderContextHealthData() + '</div>'
       : '';
 
-    // The Content tab is hidden when content analysis is disabled via
-    // claudeCodeUsage.enableContentAnalysis (the analyser returned null).
-    const contentEnabled = this.contentAnalysis !== null;
-    const contentTabButton = contentEnabled
-      ? '<button id="tab-content" class="tab ' + contentActive +
-        '" onclick="showTab(\'content\')">' + contentTab + '</button>'
-      : '';
-    const contentTabContent = contentEnabled
-      ? '<div id="content" class="tab-content ' + contentActive + '">' + this.renderContentData() + '</div>'
-      : '';
-
-    // The Activity tab rides on the same analysis pass as Content, so it is
-    // shown/hidden under the same condition.
+    // Activity (and the token-composition section folded into it) is hidden
+    // when content analysis is disabled via claudeCodeUsage.enableContentAnalysis.
     const activityEnabled = this.activityAnalysis !== null;
-    const activityTab = I18n.t.popup.activity;
     const activityTabButton = activityEnabled
-      ? '<button id="tab-activity" class="tab ' + activityActive +
-        '" onclick="showTab(\'activity\')">' + activityTab + '</button>'
+      ? '<button id="tab-activity" class="tab ' + active('activity') +
+        '" onclick="showTab(\'activity\')">' + t.activity + '</button>'
       : '';
+    // renderContentData carries its own section heading.
+    const contentSection = this.contentAnalysis !== null ? this.renderContentData() : '';
     const activityTabContent = activityEnabled
-      ? '<div id="activity" class="tab-content ' + activityActive + '">' + this.renderActivityData() + '</div>'
+      ? '<div id="activity" class="tab-content ' + active('activity') + '">' + this.renderActivityData() + contentSection + '</div>'
       : '';
+
+    // One Usage tab with an in-tab period switch (today / this month / all time).
+    // Class-based (not id) because the switch is repeated in each period div.
+    const segBtn = (name: string, label: string): string =>
+      '<button class="seg-btn seg-' + name + ' ' + active(name) + '" onclick="showTab(\'' + name + '\')">' + label + '</button>';
+    const periodSwitch =
+      '<div class="seg-row">' + segBtn('today', t.today) + segBtn('month', t.thisMonth) + segBtn('all', t.allTime) + '</div>';
 
     return (
       `
           <header>
-            <h1>` +
-      title +
-      `</h1>
+            <h1>` + t.title + `</h1>
             <div class="actions">
-              <button onclick="refresh()" class="btn-secondary">` +
-      refresh +
-      `</button>
-              <button onclick="openSettings()" class="btn-secondary">` +
-      settings +
-      `</button>
+              <button onclick="refresh()" class="btn-secondary">` + t.refresh + `</button>
+              <button onclick="openSettings()" class="btn-secondary">` + t.settings + `</button>
             </div>
           </header>
 
           <div class="tabs">
-            <button id="tab-today" class="tab ` +
-      todayActive +
-      `" onclick="showTab('today')">` +
-      today +
-      `</button>
-            <button id="tab-month" class="tab ` +
-      monthActive +
-      `" onclick="showTab('month')">` +
-      thisMonth +
-      `</button>
-            <button id="tab-all" class="tab ` +
-      allActive +
-      `" onclick="showTab('all')">` +
-      allTime +
-      `</button>
-            <button id="tab-sessions" class="tab ` +
-      sessionsActive +
-      `" onclick="showTab('sessions')">` +
-      sessions +
-      `</button>
-            <button id="tab-projects" class="tab ` +
-      projectsActive +
-      `" onclick="showTab('projects')">` +
-      projects +
-      `</button>
-            ` +
-      contentTabButton +
-      `
-            <button id="tab-branches" class="tab ` +
-      branchesActive +
-      `" onclick="showTab('branches')">` +
-      branchesTab +
-      `</button>
-            ` +
-      activityTabButton +
-      `
-            <button id="tab-quota" class="tab ` +
-      quotaActive +
-      `" onclick="showTab('quota')">` +
-      I18n.t.popup.quotaHistory +
-      `</button>
-            ` +
-      contextHealthTabButton +
-      `
+            ` + contextHealthTabButton + `
+            <button id="tab-usage" class="tab ` + (isUsage ? 'active' : '') + `" onclick="showTab('today')">` + t.usageTab + `</button>
+            <button id="tab-sessions" class="tab ` + active('sessions') + `" onclick="showTab('sessions')">` + t.sessions + `</button>
+            <button id="tab-projects" class="tab ` + active('projects') + `" onclick="showTab('projects')">` + t.projects + `</button>
+            ` + activityTabButton + `
+            <button id="tab-quota" class="tab ` + active('quota') + `" onclick="showTab('quota')">` + I18n.t.popup.quotaHistory + `</button>
           </div>
 
-          <div id="today" class="tab-content ` +
-      todayActive +
-      `">
-            ` +
-      this.renderTodayData() +
-      `
+          ` + contextHealthTabContent + `
+
+          <div id="today" class="tab-content ` + active('today') + `">
+            ` + periodSwitch + this.renderTodayData() + `
           </div>
 
-          <div id="month" class="tab-content ` +
-      monthActive +
-      `">
-            ` +
-      this.renderMonthData() +
-      `
+          <div id="month" class="tab-content ` + active('month') + `">
+            ` + periodSwitch + this.renderMonthData() + `
           </div>
 
-          <div id="all" class="tab-content ` +
-      allActive +
-      `">
-            ` +
-      this.renderAllTimeData() +
-      `
+          <div id="all" class="tab-content ` + active('all') + `">
+            ` + periodSwitch + this.renderAllTimeData() + `
           </div>
 
-          <div id="sessions" class="tab-content ` +
-      sessionsActive +
-      `">
-            ` +
-      this.renderSessionData() +
-      `
+          <div id="sessions" class="tab-content ` + active('sessions') + `">
+            ` + this.renderSessionData() + `
           </div>
 
-          <div id="projects" class="tab-content ` +
-      projectsActive +
-      `">
-            ` +
-      this.renderProjectData() +
-      `
+          <div id="projects" class="tab-content ` + active('projects') + `">
+            ` + this.renderProjectData() + this.renderBranchData() + `
           </div>
 
-          ` +
-      contentTabContent +
-      `
+          ` + activityTabContent + `
 
-          <div id="branches" class="tab-content ` +
-      branchesActive +
-      `">
-            ` +
-      this.renderBranchData() +
-      `
+          <div id="quota" class="tab-content ` + active('quota') + `">
+            ` + this.renderQuotaData() + `
           </div>
-
-          ` +
-      activityTabContent +
-      `
-
-          <div id="quota" class="tab-content ` +
-      quotaActive +
-      `">
-            ` +
-      this.renderQuotaData() +
-      `
-          </div>
-
-          ` +
-      contextHealthTabContent +
-      `
     `
     );
   }
@@ -1397,6 +1302,8 @@ export class UsageWebviewProvider {
           return t.catToolCalls;
         case 'toolResults':
           return t.catToolResults;
+        case 'injectedContext':
+          return t.catInjected;
         default:
           return key;
       }
@@ -1407,6 +1314,7 @@ export class UsageWebviewProvider {
       assistantThinking: 'cf-3',
       toolCalls: 'cf-4',
       toolResults: 'cf-5',
+      injectedContext: 'cf-6',
     };
 
     const barRow = (label: string, tokens: number, barMax: number, colorClass: string): string => {
@@ -1856,6 +1764,8 @@ export class UsageWebviewProvider {
           return p.catToolCalls;
         case 'toolResults':
           return p.catToolResults;
+        case 'injectedContext':
+          return p.catInjected;
         default:
           return key;
       }
@@ -1921,8 +1831,9 @@ export class UsageWebviewProvider {
       '<div class="ch-card"><h3>' + t.composition + '</h3>' + donut + '</div>' +
       '</div>';
 
-    // Token-efficiency card: cache health + cache-bust waste, startup baseline,
-    // and reclaimable tool output (all computed offline from the transcript).
+    // Token-efficiency card: numbers only — warnings live in the signals block,
+    // and the per-row advice text moved into row tooltips + the cc-usage-advice
+    // skill, so the card stays scannable.
     const fmtUsd = (n: number): string => '$' + n.toFixed(n >= 1 ? 2 : 3);
     const hitPct = Math.round(h.cacheHitRate);
     const hitCls = hitPct >= 50 ? 'cache-badge-good' : hitPct >= 20 ? 'cache-badge-mid' : 'cache-badge-low';
@@ -1932,16 +1843,19 @@ export class UsageWebviewProvider {
       '<span class="cache-badge ' + hitCls + '">' + hitPct + '%</span></div>'
     );
     if (h.cacheBustCount > 0) {
+      // Tokens · $ · share of the session cost, in one row (benchmark in the tooltip).
+      const share = (h.cacheWastePct || 0) >= 1 && (h.sessionCostUSD || 0) > 0
+        ? ' (' + Math.round(h.cacheWastePct) + '%)'
+        : '';
       effRows.push(
-        '<div class="ch-winrow"><span>' + t.cacheWaste + '</span>' +
-        '<span>' + num(h.cacheWastedTokens) + ' · ' + fmtUsd(h.cacheWastedUSD) + '</span></div>' +
-        '<div class="ch-rec">' + this.escapeHtml(t.recCacheBust) + '</div>'
+        '<div class="ch-winrow" title="' + this.escapeHtml(t.cacheBenchmark) + '"><span>' + t.cacheWaste + '</span>' +
+        '<span>' + num(h.cacheWastedTokens) + ' · ' + fmtUsd(h.cacheWastedUSD) + share + '</span></div>'
       );
-      // Each bust with its likely trigger, so the fix is concrete (older
-      // snapshots may not carry the cacheBusts field yet).
+      // Top bust events with their likely trigger, so the fix is concrete
+      // (older snapshots may not carry the cacheBusts field yet).
       const bustCause = (c: string): string =>
         c === 'ttlExpiry' ? t.bustTtl : c === 'modelSwitch' ? t.bustModelSwitch : c === 'parallel' ? t.bustParallel : t.bustOther;
-      for (const b of (h.cacheBusts || []).slice(0, 5)) {
+      for (const b of (h.cacheBusts || []).slice(0, 3)) {
         const at = new Date(b.at);
         const time = isNaN(at.getTime()) ? '' : this.formatDateTime(at);
         effRows.push(
@@ -1953,13 +1867,18 @@ export class UsageWebviewProvider {
     effRows.push(
       '<div class="ch-winrow ch-muted"><span>' + t.baseline + '</span><span>' + num(h.baselineTokens) + '</span></div>'
     );
-    if (h.baselineTokens >= 25000) {
-      effRows.push('<div class="ch-rec">' + this.escapeHtml(t.recBaseline) + '</div>');
-    }
-    if (h.reclaimableTokens > 0) {
+    // Masking what-if: stale tool output the session kept paying for. The
+    // token figure is cumulative across turns, so only the $ figure is shown.
+    if ((h.maskingSavingsUSD || 0) >= 0.5) {
       effRows.push(
-        '<div class="ch-winrow"><span>' + t.reclaimable + '</span><span>' + num(h.reclaimableTokens) + '</span></div>' +
-        '<div class="ch-rec">' + this.escapeHtml(t.recReclaim) + '</div>'
+        '<div class="ch-winrow" title="' + this.escapeHtml(t.recMasking) + '"><span>' + t.maskingSavings + '</span>' +
+        '<span>~' + fmtUsd(h.maskingSavingsUSD) + '</span></div>'
+      );
+    }
+    if ((h.inputOutputRatio || 0) > 0) {
+      effRows.push(
+        '<div class="ch-winrow ch-muted"><span>' + t.ioRatio + '</span>' +
+        '<span>' + Math.round(h.inputOutputRatio) + ':1</span></div>'
       );
     }
     if (h.fullFileReads > 0) {
@@ -1969,8 +1888,8 @@ export class UsageWebviewProvider {
     }
     if ((h.largestUserPromptTokens || 0) >= 10000) {
       effRows.push(
-        '<div class="ch-winrow"><span>' + t.largestPrompt + '</span><span>' + num(h.largestUserPromptTokens) + '</span></div>' +
-        '<div class="ch-rec">' + this.escapeHtml(t.recLargePrompt) + '</div>'
+        '<div class="ch-winrow" title="' + this.escapeHtml(t.recLargePrompt) + '"><span>' + t.largestPrompt + '</span>' +
+        '<span>' + num(h.largestUserPromptTokens) + '</span></div>'
       );
     }
     if (h.errorRateLowCtx >= 0 && h.errorRateHighCtx >= 0) {
@@ -2027,8 +1946,11 @@ export class UsageWebviewProvider {
     }
     const suggestion = h.status === 'healthy' ? t.suggestHealthy : t.suggestClear;
     const suggestBlock = '<div class="ch-suggest ch-suggest-' + h.status + '">' + this.escapeHtml(suggestion) + '</div>';
+    const adviceHint = '<p class="table-hint">' + this.escapeHtml(t.adviceHint) + '</p>';
 
-    return '<div class="ch">' + inspectBanner + header + windowBlock + grid + efficiencyBlock + topicsBlock + signalsBlock + switchHint + suggestBlock + '</div>';
+    // Warnings (signals) come right after the fill bar — they're the reason to
+    // look at this tab; the metric cards below carry the supporting numbers.
+    return '<div class="ch">' + inspectBanner + header + windowBlock + signalsBlock + grid + efficiencyBlock + topicsBlock + switchHint + suggestBlock + adviceHint + '</div>';
   }
 
   /** Server-rendered SVG line chart of context-window growth over the session. */
@@ -2091,6 +2013,8 @@ export class UsageWebviewProvider {
         return t.sigRepeatedCalls + ': ' + (s.label || '') + ' ×' + s.value;
       case 'largeUserPrompt':
         return t.sigLargeUserPrompt + ' (~' + s.value + 'k)';
+      case 'stuckSession':
+        return t.sigStuckSession + ' (' + s.value + '%)';
       default:
         return '';
     }
@@ -2427,6 +2351,31 @@ export class UsageWebviewProvider {
 
       .tab-content.active {
         display: block;
+      }
+
+      /* In-tab period switch (today / this month / all time) on the Usage tab. */
+      .seg-row {
+        display: inline-flex;
+        gap: 2px;
+        margin-bottom: 16px;
+        padding: 2px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 6px;
+      }
+
+      .seg-btn {
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+        padding: 4px 12px;
+        cursor: pointer;
+        color: var(--vscode-foreground);
+        font-size: 12px;
+      }
+
+      .seg-btn.active {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
       }
 
       .usage-summary {
@@ -3221,6 +3170,10 @@ export class UsageWebviewProvider {
         background: var(--vscode-charts-red);
       }
 
+      .cf-6 {
+        background: var(--vscode-charts-yellow);
+      }
+
       .heatmap {
         display: flex;
         flex-direction: column;
@@ -3290,7 +3243,6 @@ export class UsageWebviewProvider {
       .ch-window { display: flex; flex-direction: column; gap: 6px; }
       .ch-winrow { display: flex; justify-content: space-between; font-size: 13px; }
       .ch-winrow.ch-muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
-      .ch-rec { font-size: 11px; color: var(--vscode-descriptionForeground); margin: 2px 0 6px; opacity: 0.9; }
       .ch-fill {
         height: 12px;
         border-radius: 6px;
@@ -3509,17 +3461,22 @@ function showTab(tabName) {
   console.log("[DEBUG] showTab called:", tabName);
 
   try {
-    // Remove active from all tabs and contents
-    document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+    // Remove active from all tabs, period segments and contents
+    document.querySelectorAll('.tab, .seg-btn').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
-    // Add active to selected tab and content
-    const selectedTab = document.getElementById('tab-' + tabName);
+    // The three usage periods live inside the single Usage tab button.
+    const isUsagePeriod = tabName === 'today' || tabName === 'month' || tabName === 'all';
+    const selectedTab = document.getElementById(isUsagePeriod ? 'tab-usage' : 'tab-' + tabName);
     const selectedContent = document.getElementById(tabName);
 
     if (selectedTab && selectedContent) {
       selectedTab.classList.add('active');
       selectedContent.classList.add('active');
+      // Highlight the chosen period in every copy of the in-tab switch.
+      if (isUsagePeriod) {
+        document.querySelectorAll('.seg-' + tabName).forEach(b => b.classList.add('active'));
+      }
       console.log("[DEBUG] Tab switched successfully to:", tabName);
 
       // Notify extension

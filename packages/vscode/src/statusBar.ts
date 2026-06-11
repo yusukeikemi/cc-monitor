@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ClaudeApiUsageResponse, ClaudeUsageLimit, ContextHealth, ContextRotSignal, SessionData, UsageData } from './types';
 import { I18n } from './i18n';
+import { QuotaSnapshot } from './quotaHistory';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -10,6 +11,12 @@ export class StatusBarManager {
   private cacheItem: vscode.StatusBarItem;
   private contextItem: vscode.StatusBarItem;
   private isLoading: boolean = false;
+  // Last-known data so independent update paths can re-render the main item
+  // (model label comes from Context Health, costs from the usage refresh).
+  private lastToday: UsageData | null = null;
+  private lastSession: SessionData | null = null;
+  private lastHealth: ContextHealth | null = null;
+  private lastQuotaHistory: QuotaSnapshot[] = [];
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -40,7 +47,8 @@ export class StatusBarManager {
     todayData: UsageData | null,
     sessionData?: SessionData | null,
     error?: string,
-    usageLimits?: ClaudeApiUsageResponse | null
+    usageLimits?: ClaudeApiUsageResponse | null,
+    quotaHistory?: QuotaSnapshot[]
   ): void {
     this.isLoading = false;
 
@@ -56,8 +64,10 @@ export class StatusBarManager {
       return;
     }
 
+    this.lastToday = todayData;
+    this.lastSession = sessionData ?? null;
     this.showTodayData(todayData, sessionData ?? null);
-    this.updateQuota(usageLimits ?? null);
+    this.updateQuota(usageLimits ?? null, quotaHistory);
   }
 
   private updateStatusBar(): void {
@@ -69,17 +79,52 @@ export class StatusBarManager {
   }
 
   private showTodayData(todayData: UsageData, sessionData: SessionData | null): void {
-    const todayCost = I18n.formatCurrency(todayData.totalCost);
-    // Primary number = today's cost. When an active session exists, show its
-    // cost as a secondary value so per-session spend is visible at a glance.
-    let text = `$(pulse) ${todayCost}`;
-    if (sessionData && sessionData.messageCount > 0) {
-      text += ` $(history) ${I18n.formatCurrency(sessionData.totalCost)}`;
-    }
-    this.statusBarItem.text = text;
-
+    // Primary label = the model currently in use (costs stay in the tooltip
+    // and the dashboard — a number in the status bar was noise).
+    this.statusBarItem.text = `$(pulse) ${this.currentModelLabel(todayData, sessionData)}`;
     this.statusBarItem.tooltip = this.createTooltip(todayData, sessionData);
     this.statusBarItem.backgroundColor = undefined;
+  }
+
+  /** Human label of the model in use: Context Health's live model when known,
+   * otherwise the costliest model of the session (then of today). */
+  private currentModelLabel(todayData: UsageData, sessionData: SessionData | null): string {
+    if (this.lastHealth?.model) {
+      return this.prettyModel(this.lastHealth.model);
+    }
+    const topModel = (d: UsageData | null): string => {
+      if (!d) {
+        return '';
+      }
+      let best = '';
+      let bestCost = -1;
+      for (const [m, v] of Object.entries(d.modelBreakdown)) {
+        if (v.cost > bestCost) {
+          bestCost = v.cost;
+          best = m;
+        }
+      }
+      return best;
+    };
+    const id = topModel(sessionData) || topModel(todayData);
+    return id ? this.prettyModel(id) : 'Claude';
+  }
+
+  /** "claude-opus-4-8" → "Opus 4.8", "claude-fable-5[1m]" → "Fable 5",
+   * "claude-3-5-sonnet-20241022" → "Sonnet 3.5". Unknown shapes pass through. */
+  private prettyModel(id: string): string {
+    const segs = id
+      .replace(/\[.*?\]$/, '')
+      .replace(/^claude-/, '')
+      .split('-')
+      .filter((p) => p !== '' && !/^\d{8}$/.test(p)); // drop date segments
+    const alpha = segs.find((p) => /[a-zA-Z]/.test(p));
+    if (!alpha) {
+      return id;
+    }
+    const name = alpha.charAt(0).toUpperCase() + alpha.slice(1);
+    const version = segs.filter((p) => /^\d+$/.test(p)).join('.');
+    return version ? `${name} ${version}` : name;
   }
 
   /**
@@ -87,7 +132,10 @@ export class StatusBarManager {
    * OAuth usage API. Hidden when the data is unavailable (e.g. not signed in).
    * Public so it can be refreshed on its own while the rest of the UI is idle.
    */
-  updateQuota(usageLimits: ClaudeApiUsageResponse | null): void {
+  updateQuota(usageLimits: ClaudeApiUsageResponse | null, quotaHistory?: QuotaSnapshot[]): void {
+    if (quotaHistory && quotaHistory.length > 0) {
+      this.lastQuotaHistory = quotaHistory;
+    }
     const fiveHour = usageLimits?.five_hour;
     const weekly = usageLimits?.seven_day;
     if (!fiveHour && !weekly) {
@@ -134,7 +182,16 @@ export class StatusBarManager {
     }
     const remainingMs = CACHE_TTL_MS - (Date.now() - lastRequestTime.getTime());
     if (remainingMs <= 0) {
-      this.cacheItem.hide();
+      // Cold is information too: the next request re-writes the whole prefix.
+      this.cacheItem.text = `$(zap) —`;
+      const md = new vscode.MarkdownString();
+      md.supportThemeIcons = true;
+      md.appendMarkdown(`**$(zap) Prompt Cache**\n\n`);
+      md.appendMarkdown(`Cache **cold** — the 5-minute TTL has expired, so the next request re-writes the cached prefix at the 1.25× write rate.\n\n`);
+      md.appendMarkdown(`Last request: ${lastRequestTime.toLocaleTimeString()}`);
+      this.cacheItem.tooltip = md;
+      this.cacheItem.backgroundColor = undefined;
+      this.cacheItem.show();
       return;
     }
     const totalSec = Math.ceil(remainingMs / 1000);
@@ -170,6 +227,12 @@ export class StatusBarManager {
    * warning icon + background. Hidden when no active session is available.
    */
   updateContextHealth(health: ContextHealth | null): void {
+    this.lastHealth = health;
+    // The main item's model label comes from here — re-render it now that the
+    // live session model is known (the usage refresh may have run first).
+    if (this.lastToday) {
+      this.showTodayData(this.lastToday, this.lastSession);
+    }
     if (!health) {
       this.contextItem.hide();
       return;
@@ -256,6 +319,8 @@ export class StatusBarManager {
           return p.catToolCalls;
         case 'toolResults':
           return p.catToolResults;
+        case 'injectedContext':
+          return p.catInjected;
         default:
           return key;
       }
@@ -321,6 +386,8 @@ export class StatusBarManager {
         return `${t.sigRepeatedCalls}: ${s.label} ×${s.value}`;
       case 'largeUserPrompt':
         return `${t.sigLargeUserPrompt} (~${s.value}k)`;
+      case 'stuckSession':
+        return `${t.sigStuckSession} (${s.value}%)`;
       default:
         return '';
     }
@@ -404,9 +471,9 @@ export class StatusBarManager {
     const PAD = '  ';
     const GAP = '    ';
     md.appendMarkdown(
-      `|${PAD}${t.quotaWindow}${PAD}|${PAD}${t.share}${PAD}|${GAP}${PAD}${t.resets}${PAD}|\n`
+      `|${PAD}${t.quotaWindow}${PAD}|${PAD}${PAD}|${PAD}${t.share}${PAD}|${GAP}${PAD}${t.resets}${PAD}|\n`
     );
-    md.appendMarkdown(`|:--|--:|--:|\n`);
+    md.appendMarkdown(`|:--|:--|--:|--:|\n`);
 
     if (usageLimits.five_hour) {
       this.appendQuotaRow(md, t.quota5h, usageLimits.five_hour, false);
@@ -418,8 +485,51 @@ export class StatusBarManager {
       this.appendQuotaRow(md, `${t.quotaWeekly} (Opus)`, usageLimits.seven_day_opus, true);
     }
 
-    md.appendMarkdown(`\n\n*${t.quotaHint}*`);
+    // Recent shape of the quota from the local history: how the 5-hour window
+    // filled over the last 24h, and the weekly window over the last 7 days.
+    const spark5h = this.quotaSparkline((s) => s.fiveHour, 24 * 60);
+    const sparkWk = this.quotaSparkline((s) => s.sevenDay, 7 * 24 * 60);
+    if (spark5h || sparkWk) {
+      md.appendMarkdown(`\n**${t.quotaOverTime}**\n\n`);
+      if (spark5h) {
+        md.appendMarkdown(`\`${spark5h}\` ${t.quota5h} (24h)\n\n`);
+      }
+      if (sparkWk) {
+        md.appendMarkdown(`\`${sparkWk}\` ${t.quotaWeekly} (7d)\n\n`);
+      }
+    }
+
+    md.appendMarkdown(`\n*${t.quotaHint}*`);
     return md;
+  }
+
+  /** Unicode sparkline of one quota series from the recorded history, on an
+   * absolute 0-100% scale (bar height = how full the window was). */
+  private quotaSparkline(pick: (s: QuotaSnapshot) => number | null, windowMinutes: number): string {
+    const cutoff = Date.now() - windowMinutes * 60_000;
+    const pts: number[] = [];
+    for (const s of this.lastQuotaHistory) {
+      const v = pick(s);
+      const ts = Date.parse(s.ts);
+      if (v != null && !isNaN(ts) && ts >= cutoff) {
+        pts.push(Math.max(0, Math.min(100, v)));
+      }
+    }
+    if (pts.length < 2) {
+      return '';
+    }
+    // Down-sample to a tooltip-friendly width.
+    const WIDTH = 24;
+    let series = pts;
+    if (pts.length > WIDTH) {
+      series = [];
+      const step = (pts.length - 1) / (WIDTH - 1);
+      for (let i = 0; i < WIDTH; i++) {
+        series.push(pts[Math.round(i * step)]);
+      }
+    }
+    const blocks = '▁▂▃▄▅▆▇█';
+    return series.map((v) => blocks[Math.max(0, Math.min(7, Math.floor((v / 100) * 7.999)))]).join('');
   }
 
   private appendQuotaRow(md: vscode.MarkdownString, label: string, limit: ClaudeUsageLimit, weekly: boolean): void {
@@ -434,7 +544,7 @@ export class StatusBarManager {
     const PAD = '  ';
     const GAP = '    ';
     md.appendMarkdown(
-      `|${PAD}${label}${PAD}|${PAD}${limit.utilization.toFixed(1)}%${PAD}|${GAP}${PAD}${resets}${PAD}|\n`
+      `|${PAD}${label}${PAD}|${PAD}\`${this.bar(limit.utilization / 100)}\`${PAD}|${PAD}${limit.utilization.toFixed(1)}%${PAD}|${GAP}${PAD}${resets}${PAD}|\n`
     );
   }
 

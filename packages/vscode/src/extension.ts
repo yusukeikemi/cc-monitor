@@ -219,14 +219,16 @@ export class ClaudeCodeUsageExtension {
     }, intervalMs);
   }
 
-  /** Tick the cache-warmth countdown every 30 s (independent of the data refresh). */
+  /** Tick the cache-warmth countdown every second (independent of the data
+   * refresh) so the m:ss readout counts down smoothly. The tick is a Date
+   * subtraction + status-bar text set — negligible work. */
   private startCacheWarmthTimer(): void {
     if (this.cacheWarmthTimer) {
       clearInterval(this.cacheWarmthTimer);
     }
     this.cacheWarmthTimer = setInterval(() => {
       this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
-    }, 30_000);
+    }, 1_000);
   }
 
   /** Fetch real usage limits via OAuth, cached for 2 minutes. */
@@ -336,7 +338,7 @@ export class ClaudeCodeUsageExtension {
         : null;
 
       // Update UI
-      this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits);
+      this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits, quotaHistory);
       this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
       this.statusBar.updateContextHealth(contextHealth);
       this.maybeNotifyContextRot(config, contextHealth);

@@ -123,7 +123,6 @@ interface AnalysisAcc {
   toolIdToName: Record<string, string>;
   seenUuids: Set<string>;
   cutoffMs: number;
-  prompts: { cwd: string; text: string }[];
   // --- activity accumulators ---
   toolActivity: Record<string, ToolActivity>;
   skills: Record<string, number>;
@@ -156,7 +155,6 @@ function newAnalysisAcc(cutoffMs: number, windowDays: number): AnalysisAcc {
     toolIdToName: {},
     seenUuids: new Set<string>(),
     cutoffMs,
-    prompts: [],
     toolActivity: {},
     skills: {},
     subagents: {},
@@ -179,18 +177,6 @@ function newAnalysisAcc(cutoffMs: number, windowDays: number): AnalysisAcc {
     titlesBySession: new Map<string, string>(),
     windowDays,
   };
-}
-
-// Collect an actual user prompt (capped + truncated) for the AI-advice feature.
-function collectPrompt(acc: AnalysisAcc, cwd: string, text: string): void {
-  const trimmed = text.trim();
-  if (trimmed.length < 4) {
-    return;
-  }
-  acc.prompts.push({ cwd, text: trimmed.slice(0, 2500) });
-  if (acc.prompts.length > 600) {
-    acc.prompts.shift();
-  }
 }
 
 // Rough token estimate from text length (CJK characters are denser than ASCII).
@@ -448,7 +434,6 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
   }
   const role = message.role || parsed.type;
   const content = message.content;
-  const cwd = typeof parsed.cwd === 'string' ? parsed.cwd : '';
 
   if (role === 'assistant') {
     // Turn outcome and main/subagent output-token split.
@@ -500,12 +485,15 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
     }
   } else if (role === 'user') {
     const isMeta = parsed.isMeta === true;
+    // Meta messages are harness-injected (skill bodies, command expansions) —
+    // they fill the window like a prompt but the user never typed them, so
+    // they get their own composition bucket and stay out of the prompt feed.
+    const textBucket = isMeta ? 'injectedContext' : 'userPrompts';
     let hasRealText = false;
     let recordToolName: string | null = null;
 
     if (typeof content === 'string') {
-      addToBucket(acc.cat, 'userPrompts', content);
-      collectPrompt(acc, cwd, content);
+      addToBucket(acc.cat, textBucket, content);
       if (content.trim().length >= 4) {
         hasRealText = true;
       }
@@ -524,8 +512,7 @@ function analyzeLine(parsed: any, acc: AnalysisAcc): void {
             bumpTool(acc, toolName).errors++;
           }
         } else if (block.type === 'text' && typeof block.text === 'string') {
-          addToBucket(acc.cat, 'userPrompts', block.text);
-          collectPrompt(acc, cwd, block.text);
+          addToBucket(acc.cat, textBucket, block.text);
           if (block.text.trim().length >= 4) {
             hasRealText = true;
           }
@@ -561,7 +548,6 @@ function finalizeAnalysis(acc: AnalysisAcc): ContentAnalysis {
     categories,
     toolResultBreakdown: toSlices(acc.tools),
     totalEstimatedTokens: categories.reduce((sum, c) => sum + c.estimatedTokens, 0),
-    recentPrompts: acc.prompts.slice(-300),
   };
 }
 
@@ -885,10 +871,13 @@ export class ClaudeDataLoader {
     let model = latest.message.model || '';
     let lastAssistantMs = -Infinity;
     const readCounts: Record<string, number> = {};
-    // Per-assistant-turn cache usage (time-ordered) for cache-bust detection.
-    const turns: { ts: number; read: number; create: number; input: number; model: string }[] = [];
-    let sumRead = 0, sumCreate = 0, sumInput = 0; // session totals for the cache hit rate
+    // Per-assistant-turn cache usage (time-ordered) for cache-bust detection
+    // and the per-turn session-cost estimate.
+    const turns: { ts: number; read: number; create: number; input: number; output: number; model: string }[] = [];
+    let sumRead = 0, sumCreate = 0, sumInput = 0, sumOutput = 0; // session totals (cache hit rate, in:out ratio)
     const toolResultSizes: number[] = []; // estimated tokens of each individual tool_result
+    const toolResultEvents: { ts: number; tokens: number }[] = []; // timed, for the masking what-if
+    let errorToolResultTokens = 0; // tokens spent on tool calls that errored (waste accounting)
     let fullFileReads = 0; // Read calls with no offset/limit (whole-file dumps)
     let currentCtx = 0; // running context size (latest assistant turn so far)
     const toolEvents: { ctx: number; error: boolean }[] = []; // per tool_result, for #4
@@ -933,6 +922,12 @@ export class ClaudeDataLoader {
             const sz = estimateTokens(blockText(block.content));
             if (sz > 0) {
               toolResultSizes.push(sz);
+              if (!isNaN(tsMs)) {
+                toolResultEvents.push({ ts: tsMs, tokens: sz });
+              }
+              if (block.is_error === true) {
+                errorToolResultTokens += sz;
+              }
             }
             toolEvents.push({ ctx: currentCtx, error: block.is_error === true });
           }
@@ -952,12 +947,14 @@ export class ClaudeDataLoader {
         const read = u.cache_read_input_tokens || 0;
         const create = u.cache_creation_input_tokens || 0;
         const inp = u.input_tokens || 0;
+        const out = u.output_tokens || 0;
         sumRead += read;
         sumCreate += create;
         sumInput += inp;
+        sumOutput += out;
         if (!isNaN(tsMs)) {
           ctxSeries.push({ ts: tsMs, ctx });
-          turns.push({ ts: tsMs, read, create, input: inp, model: typeof message.model === 'string' ? message.model : model });
+          turns.push({ ts: tsMs, read, create, input: inp, output: out, model: typeof message.model === 'string' ? message.model : model });
         }
         if (!isNaN(tsMs) && tsMs >= lastAssistantMs) {
           lastAssistantMs = tsMs;
@@ -1183,6 +1180,54 @@ export class ClaudeDataLoader {
       ? Math.max(0, cacheWastedTokens * ((pricing.cache_creation_input_token_cost || 0) - (pricing.cache_read_input_token_cost || 0)))
       : 0;
 
+    // Estimated session cost (per-turn usage × that turn's model pricing), so
+    // the cache waste can be expressed as a share of what the session cost.
+    let sessionCostUSD = 0;
+    for (const tn of turns) {
+      const pr = getModelPricing(tn.model);
+      if (!pr) {
+        continue;
+      }
+      sessionCostUSD +=
+        tn.input * (pr.input_cost_per_token || 0) +
+        tn.output * (pr.output_cost_per_token || 0) +
+        tn.create * (pr.cache_creation_input_token_cost || 0) +
+        tn.read * (pr.cache_read_input_token_cost || 0);
+    }
+    const cacheWastePct = sessionCostUSD > 0 ? Math.min(100, (cacheWastedUSD / sessionCostUSD) * 100) : 0;
+
+    // Masking what-if (arXiv:2508.21433): had tool outputs older than the
+    // keep-window been masked, every later request's input side would have been
+    // that much smaller. Attribute each tool result to the assistant turn it
+    // followed, then for each turn sum the results that had gone stale by then.
+    // Rough by design: masked tokens are priced at the cache-read rate (what
+    // resident context actually costs per turn), and the cache re-writes a
+    // masking boundary would itself cause are ignored.
+    const MASK_KEEP_TURNS = 10;
+    let maskingSavingsTokens = 0;
+    if (turns.length > MASK_KEEP_TURNS && toolResultEvents.length > 0) {
+      toolResultEvents.sort((a, b) => a.ts - b.ts);
+      const tokensByTurn = new Array<number>(turns.length).fill(0);
+      let ti = 0;
+      for (const ev of toolResultEvents) {
+        while (ti + 1 < turns.length && turns[ti + 1].ts <= ev.ts) {
+          ti++;
+        }
+        tokensByTurn[ti] += ev.tokens;
+      }
+      const prefix = new Array<number>(turns.length).fill(0);
+      for (let i = 0; i < turns.length; i++) {
+        prefix[i] = tokensByTurn[i] + (i > 0 ? prefix[i - 1] : 0);
+      }
+      for (let i = MASK_KEEP_TURNS + 1; i < turns.length; i++) {
+        maskingSavingsTokens += prefix[i - MASK_KEEP_TURNS - 1];
+      }
+    }
+    const maskingSavingsUSD = pricing ? maskingSavingsTokens * (pricing.cache_read_input_token_cost || 0) : 0;
+
+    // Input-side tokens paid per output token (agent norm: 2:1 up to 150:1).
+    const inputOutputRatio = sumOutput > 0 ? (sumRead + sumCreate + sumInput) / sumOutput : 0;
+
     // Startup baseline: the first request's written/processed prefix (system
     // prompt + tool schemas + CLAUDE.md), present every session regardless of work.
     const firstTurn = turns.length > 0 ? turns[0] : null;
@@ -1249,6 +1294,21 @@ export class ClaudeDataLoader {
       signals.push({ kind: 'largeUserPrompt', value: Math.round(largestUserPromptTokens / 1000) });
     }
 
+    // Stuck session: the recent tool-error rate spiked well above the session's
+    // earlier rate — the observable shape of a run that stopped making progress
+    // (trajectory-level early-warning, after arXiv:2601.05777). Whether to cut
+    // losses stays the user's call; this only surfaces the trend.
+    const STUCK_RECENT = 12;
+    if (toolEvents.length >= STUCK_RECENT + 8) {
+      const recent = toolEvents.slice(-STUCK_RECENT);
+      const earlier = toolEvents.slice(0, -STUCK_RECENT);
+      const recentErrPct = (recent.filter((e) => e.error).length / recent.length) * 100;
+      const earlierErrPct = (earlier.filter((e) => e.error).length / earlier.length) * 100;
+      if (recentErrPct >= 40 && recentErrPct >= earlierErrPct * 2) {
+        signals.push({ kind: 'stuckSession', value: Math.round(recentErrPct) });
+      }
+    }
+
     // --- Overall status ---
     const hasLarge = signals.some((s) => s.kind === 'largeToolResult');
     const hasMulti = signals.some((s) => s.kind === 'multiTopic');
@@ -1277,6 +1337,13 @@ export class ClaudeDataLoader {
       cacheWastedTokens,
       cacheWastedUSD,
       cacheBusts,
+      sessionCostUSD,
+      cacheWastePct,
+      maskingSavingsTokens,
+      maskingSavingsUSD,
+      inputOutputRatio,
+      errorToolResultTokens,
+      wasteTokens: cacheWastedTokens + errorToolResultTokens,
       baselineTokens,
       reclaimableTokens,
       fullFileReads,

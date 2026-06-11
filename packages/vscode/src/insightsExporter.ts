@@ -94,8 +94,7 @@ export class InsightsExporter {
       })),
       // Exact counts over the analysis window (tools, skills, subagents, …).
       activity: input.activity,
-      // Estimated token composition. recentPrompts is intentionally excluded:
-      // the snapshot must not duplicate conversation text.
+      // Estimated token composition (no conversation text is included).
       content: input.content
         ? {
             categories: input.content.categories,

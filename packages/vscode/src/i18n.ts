@@ -50,13 +50,15 @@ export interface Translations {
     efficiency: string;
     cacheWaste: string;
     baseline: string;
-    reclaimable: string;
     fullFileReadsLabel: string;
-    recCacheBust: string;
-    recBaseline: string;
-    recReclaim: string;
+    sigStuckSession: string;
+    maskingSavings: string;
+    recMasking: string;
+    cacheBenchmark: string;
+    ioRatio: string;
     suggestClear: string;
     suggestHealthy: string;
+    adviceHint: string;
   };
   popup: {
     title: string;
@@ -64,6 +66,7 @@ export interface Translations {
     today: string;
     thisMonth: string;
     allTime: string;
+    usageTab: string;
     refresh: string;
     settings: string;
     totalTokens: string;
@@ -85,18 +88,13 @@ export interface Translations {
     hour: string;
     projects: string;
     projectBreakdown: string;
-    fullPath: string;
     peakContext: string;
     tokenComposition: string;
     lastActive: string;
     pricing: string;
-    refreshPricing: string;
-    pricingUpdated: string;
-    pricingUpdateFailed: string;
     sortHint: string;
     quota: string;
     quotaWindow: string;
-    quotaLimit: string;
     quota5h: string;
     quotaWeekly: string;
     quotaHint: string;
@@ -108,6 +106,7 @@ export interface Translations {
     catAssistantThinking: string;
     catToolCalls: string;
     catToolResults: string;
+    catInjected: string;
     estTokens: string;
     share: string;
     resets: string;
@@ -115,23 +114,13 @@ export interface Translations {
     cacheLowEfficiency: string;
     cacheEfficiencyTip: string;
     last30days: string;
-    branches: string;
     branchBreakdown: string;
     branch: string;
-    getAdvice: string;
-    adviceNeedsKey: string;
-    adviceGenerating: string;
-    adviceFailed: string;
-    adviceScopeOverall: string;
-    adviceScopePrompt: string;
-    adviceDemoButton: string;
-    adviceDemoNotice: string;
     costComposition: string;
     date: string;
     yesterday: string;
     dataDirectory: string;
     noDataMessage: string;
-    errorMessage: string;
     // Activity tab
     activity: string;
     toolUsage: string;
@@ -142,7 +131,6 @@ export interface Translations {
     errors: string;
     errorRate: string;
     avgDuration: string;
-    skill: string;
     subagent: string;
     tokensCol: string;
     toolUses: string;
@@ -150,7 +138,6 @@ export interface Translations {
     prsCreated: string;
     turnOutcomes: string;
     permissionModes: string;
-    codeChanges: string;
     filesEdited: string;
     linesAdded: string;
     linesRemoved: string;
@@ -238,13 +225,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       efficiency: 'Token efficiency',
       cacheWaste: 'Cache waste',
       baseline: 'Startup baseline',
-      reclaimable: 'Reclaimable tool output',
       fullFileReadsLabel: 'Whole-file reads',
-      recCacheBust: 'Avoid switching models mid-session to keep the cache warm.',
-      recBaseline: 'Trim CLAUDE.md (<200 lines) and disable unused MCP servers.',
-      recReclaim: 'Large tool outputs — prefer targeted reads and truncation.',
+    sigStuckSession: 'Recent tool errors spiked — the session may be stuck (re-aim the task or start fresh)',
+    maskingSavings: 'Stale tool output carried',
+    recMasking: 'Old tool outputs are re-billed every turn. A /clear or handoff sheds them — masking them matches LLM summarization at half the cost.',
+    cacheBenchmark: 'Research baseline: strategic caching saves 41–80% on agent workloads.',
+    ioRatio: 'Input : output tokens',
       suggestClear: 'Consider /clear to start a fresh topic.',
       suggestHealthy: 'Context looks healthy.',
+    adviceHint: 'For detailed, personalised advice run /cc-usage-advice in Claude Code.',
     },
     popup: {
       title: 'Claude Code Usage',
@@ -252,6 +241,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       today: 'Today',
       thisMonth: 'This Month',
       allTime: 'All Time',
+    usageTab: 'Usage',
       refresh: 'Refresh',
       settings: 'Settings',
       totalTokens: 'Total Tokens',
@@ -273,18 +263,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       hour: 'Hour',
       projects: 'Projects',
       projectBreakdown: 'Project Usage',
-      fullPath: 'Full Path',
       peakContext: 'Peak Context',
       tokenComposition: 'Token Composition',
       lastActive: 'Last Active',
       pricing: 'Pricing',
-      refreshPricing: 'Refresh Token Pricing',
-      pricingUpdated: 'Pricing updated',
-      pricingUpdateFailed: 'Failed to update pricing',
       sortHint: 'Click a column header to sort',
       quota: 'Quota',
       quotaWindow: 'Window',
-      quotaLimit: 'Limit',
       quota5h: '5-hour',
       quotaWeekly: 'Weekly',
       quotaHint: 'Real data from Anthropic /usage.',
@@ -296,6 +281,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       catAssistantThinking: 'Assistant thinking',
       catToolCalls: 'Tool calls',
       catToolResults: 'Tool results',
+    catInjected: 'Injected (skills/commands)',
       estTokens: 'Est. tokens',
       share: 'Share',
       resets: 'Resets',
@@ -303,23 +289,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       cacheLowEfficiency: 'Projects with low cache efficiency (< 20%)',
       cacheEfficiencyTip: 'Low rates often mean repeated file reads without cache warmup. Try keeping sessions in the same working directory, or add key files to CLAUDE.md.',
       last30days: 'Last 30 days',
-      branches: 'Branches',
       branchBreakdown: 'Branch Usage',
       branch: 'Branch',
-      getAdvice: 'Get AI Advice',
-      adviceNeedsKey: 'Set an API key in Settings to use AI advice.',
-      adviceGenerating: 'Generating usage advice…',
-      adviceFailed: 'Failed to get advice',
-      adviceScopeOverall: 'Overall (all projects)',
-      adviceScopePrompt: 'Choose what the advice should focus on',
-      adviceDemoButton: 'Preview demo',
-      adviceDemoNotice: '',
       costComposition: 'Cost Composition',
       date: 'Date',
       yesterday: 'Yesterday',
       dataDirectory: 'Data Directory',
       noDataMessage: 'No usage data found. Make sure Claude Code is running and configured correctly.',
-      errorMessage: 'Error loading usage data. Please check your configuration.',
       activity: 'Activity',
       toolUsage: 'Tool Usage',
       toolCalls: 'Tool Calls',
@@ -329,7 +305,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       errors: 'Errors',
       errorRate: 'Error Rate',
       avgDuration: 'Avg Time',
-      skill: 'Skill',
       subagent: 'Subagent',
       tokensCol: 'Tokens',
       toolUses: 'Tool Uses',
@@ -337,7 +312,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       prsCreated: 'PRs Created',
       turnOutcomes: 'Turn Outcomes',
       permissionModes: 'Permission Modes',
-      codeChanges: 'Code Changes',
       filesEdited: 'Files Edited',
       linesAdded: 'Lines Added',
       linesRemoved: 'Lines Removed',
@@ -422,13 +396,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       efficiency: "Token-Effizienz",
       cacheWaste: "Cache-Verschwendung",
       baseline: "Start-Grundlast",
-      reclaimable: "Rückgewinnbare Tool-Ausgabe",
       fullFileReadsLabel: "Ganzdatei-Lesevorgänge",
-      recCacheBust: "Modellwechsel mitten in der Sitzung vermeiden, um den Cache warm zu halten.",
-      recBaseline: "CLAUDE.md kürzen (<200 Zeilen) und ungenutzte MCP-Server deaktivieren.",
-      recReclaim: "Große Tool-Ausgaben — gezielte Reads und Kürzung bevorzugen.",
+    sigStuckSession: "Tool-Fehler haben zuletzt stark zugenommen — die Session steckt womöglich fest (Aufgabe neu ausrichten oder neu starten)",
+    maskingSavings: "Mitgeschleppte alte Tool-Ausgaben",
+    recMasking: "Alte Tool-Ausgaben werden in jedem Turn erneut berechnet. Ein /clear oder Handoff entfernt sie — Maskieren erreicht LLM-Zusammenfassung bei halben Kosten.",
+    cacheBenchmark: "Forschungs-Referenz: strategisches Caching spart 41–80 % bei Agent-Workloads.",
+    ioRatio: "Input : Output Tokens",
       suggestClear: "Mit /clear ein neues Thema beginnen.",
       suggestHealthy: "Kontext sieht gesund aus.",
+    adviceHint: "Für detaillierte, persönliche Empfehlungen /cc-usage-advice in Claude Code ausführen.",
     },
     popup: {
       title: "Claude Code Nutzung",
@@ -436,6 +412,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       today: "Heute",
       thisMonth: "Diesen Monat",
       allTime: "Seit Aufzeichnungsbeginn",
+    usageTab: "Nutzung",
       refresh: "Aktualisieren",
       settings: "Einstellungen",
       totalTokens: "Gesamte Token",
@@ -457,18 +434,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       hour: "Stunde",
       projects: "Projekte",
       projectBreakdown: "Nutzung nach Projekt",
-      fullPath: "Vollständiger Pfad",
       peakContext: "Größter Kontext",
       tokenComposition: "Token-Zusammensetzung",
       lastActive: "Zuletzt aktiv",
       pricing: "Preise",
-      refreshPricing: "Token-Preise aktualisieren",
-      pricingUpdated: "Preise aktualisiert",
-      pricingUpdateFailed: "Preisaktualisierung fehlgeschlagen",
       sortHint: "Zum Sortieren auf eine Spaltenüberschrift klicken",
       quota: "Kontingent",
       quotaWindow: "Zeitfenster",
-      quotaLimit: "Limit",
       quota5h: "5 Stunden",
       quotaWeekly: "Woche",
       quotaHint: "Echte Daten von Anthropic /usage.",
@@ -480,6 +452,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       catAssistantThinking: "Assistent-Denken",
       catToolCalls: "Tool-Aufrufe",
       catToolResults: "Tool-Ergebnisse",
+    catInjected: "Injiziert (Skills/Befehle)",
       estTokens: "Gesch. Token",
       share: "Anteil",
       resets: "Reset",
@@ -487,25 +460,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       cacheLowEfficiency: "Projekte mit niedriger Cache-Effizienz (< 20%)",
       cacheEfficiencyTip: "Niedrige Raten deuten oft auf wiederholte Dateilesevorgänge ohne Cache-Aufwärmung hin. Versuche, Sitzungen im selben Arbeitsverzeichnis zu starten, oder füge wichtige Dateien zu CLAUDE.md hinzu.",
       last30days: "Letzte 30 Tage",
-      branches: "Branches",
       branchBreakdown: "Nutzung nach Branch",
       branch: "Branch",
-      getAdvice: "KI-Rat holen",
-      adviceNeedsKey: "API-Schlüssel in den Einstellungen festlegen, um KI-Rat zu nutzen.",
-      adviceGenerating: "Nutzungsrat wird erstellt…",
-      adviceFailed: "Rat konnte nicht abgerufen werden",
-      adviceScopeOverall: "Gesamt (alle Projekte)",
-      adviceScopePrompt: "Worauf soll sich der Rat konzentrieren?",
-      adviceDemoButton: "Demo ansehen",
-      adviceDemoNotice: '',
       costComposition: "Kostenzusammensetzung",
       date: "Datum",
       yesterday: "Gestern",
       dataDirectory: "Daten Pfad",
       noDataMessage:
         "Keine Daten gefunden. Stell sicher, dass Claude Code läuft und entsprechend konfiguriert ist.",
-      errorMessage:
-        "Fehler beim laden der Nutzungsdaten. Bitte prüfe deine Konfiguration.",
       activity: "Aktivität",
       toolUsage: "Tool-Nutzung",
       toolCalls: "Tool-Aufrufe",
@@ -515,7 +477,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       errors: "Fehler",
       errorRate: "Fehlerrate",
       avgDuration: "Ø Zeit",
-      skill: "Skill",
       subagent: "Subagent",
       tokensCol: "Token",
       toolUses: "Tool-Aufrufe",
@@ -523,7 +484,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       prsCreated: "Erstellte PRs",
       turnOutcomes: "Turn-Ergebnisse",
       permissionModes: "Berechtigungsmodi",
-      codeChanges: "Code-Änderungen",
       filesEdited: "Bearbeitete Dateien",
       linesAdded: "Zeilen hinzugefügt",
       linesRemoved: "Zeilen entfernt",
@@ -608,13 +568,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       efficiency: 'Token 效率',
       cacheWaste: '快取浪費',
       baseline: '啟動基準量',
-      reclaimable: '可回收的工具輸出',
       fullFileReadsLabel: '整檔讀取',
-      recCacheBust: '避免在工作階段中途切換模型，以保持快取有效。',
-      recBaseline: '精簡 CLAUDE.md（<200 行）並停用未使用的 MCP 伺服器。',
-      recReclaim: '工具輸出過大——建議改用精準讀取與截斷。',
+    sigStuckSession: '近期工具錯誤激增——工作階段可能卡住了（建議重新聚焦任務或重新開始）',
+    maskingSavings: '殘留的舊工具輸出',
+    recMasking: '舊的工具輸出每一輪都會重複計費。/clear 或交接即可移除——遮蔽舊輸出可用一半成本達到 LLM 摘要的效果。',
+    cacheBenchmark: '研究基準：策略性快取管理可在代理工作負載上節省 41–80%。',
+    ioRatio: '輸入 : 輸出 token',
       suggestClear: '建議使用 /clear 開始新話題。',
       suggestHealthy: '上下文狀態良好。',
+    adviceHint: '想取得更詳細的個人化建議，請在 Claude Code 執行 /cc-usage-advice。',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -622,6 +584,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       today: '今日',
       thisMonth: '本月',
       allTime: '所有',
+      usageTab: '使用量',
       refresh: '重新整理',
       settings: '設定',
       totalTokens: '總 Token 數',
@@ -643,18 +606,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       hour: '小時',
       projects: '專案',
       projectBreakdown: '各專案使用量',
-      fullPath: '完整路徑',
       peakContext: '峰值上下文',
       tokenComposition: 'Token 組成',
       lastActive: '最近活動',
       pricing: '計費標準',
-      refreshPricing: '更新 Token 單價',
-      pricingUpdated: '價格已更新',
-      pricingUpdateFailed: '價格更新失敗',
       sortHint: '點擊欄位標題可排序',
       quota: '用量額度',
       quotaWindow: '時間視窗',
-      quotaLimit: '上限',
       quota5h: '5 小時',
       quotaWeekly: '每週',
       quotaHint: '來自 Anthropic /usage 的真實資料。',
@@ -666,6 +624,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       catAssistantThinking: '助手思考',
       catToolCalls: '工具呼叫',
       catToolResults: '工具結果',
+    catInjected: '注入內容（技能／指令）',
       estTokens: '估算 Token',
       share: '佔比',
       resets: '重置',
@@ -673,23 +632,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       cacheLowEfficiency: '快取效率偏低的專案（< 20%）',
       cacheEfficiencyTip: '命中率偏低通常代表檔案被重複讀取而未暖機。建議在相同工作目錄下開始會話，或將常用檔案加入 CLAUDE.md。',
       last30days: '近 30 天',
-      branches: '分支',
       branchBreakdown: '各分支使用量',
       branch: '分支',
-      getAdvice: '取得 AI 建議',
-      adviceNeedsKey: '請先在設定中填入 API 金鑰以使用 AI 建議。',
-      adviceGenerating: '正在產生使用建議…',
-      adviceFailed: '取得建議失敗',
-      adviceScopeOverall: '整體(所有專案)',
-      adviceScopePrompt: '選擇建議要聚焦的範圍',
-      adviceDemoButton: '查看示範',
-      adviceDemoNotice: '',
       costComposition: '成本構成',
       date: '日期',
       yesterday: '昨日',
       dataDirectory: '資料目錄',
       noDataMessage: '找不到使用資料。請確認 Claude Code 正在執行且設定正確。',
-      errorMessage: '載入使用資料時發生錯誤。請檢查您的設定。',
       activity: '活動',
       toolUsage: '工具使用',
       toolCalls: '工具呼叫',
@@ -699,7 +648,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       errors: '錯誤',
       errorRate: '錯誤率',
       avgDuration: '平均耗時',
-      skill: 'Skill',
       subagent: '子代理',
       tokensCol: 'Token',
       toolUses: '工具呼叫數',
@@ -707,7 +655,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       prsCreated: '建立的 PR',
       turnOutcomes: '回合結果',
       permissionModes: '權限模式',
-      codeChanges: '程式碼變更',
       filesEdited: '編輯檔案數',
       linesAdded: '新增行數',
       linesRemoved: '刪除行數',
@@ -792,13 +739,15 @@ const translations: Record<SupportedLanguage, Translations> = {
       efficiency: 'Token 效率',
       cacheWaste: '缓存浪费',
       baseline: '启动基准量',
-      reclaimable: '可回收的工具输出',
       fullFileReadsLabel: '整文件读取',
-      recCacheBust: '避免在会话中途切换模型，以保持缓存有效。',
-      recBaseline: '精简 CLAUDE.md（<200 行）并停用未使用的 MCP 服务器。',
-      recReclaim: '工具输出过大——建议改用精准读取与截断。',
+    sigStuckSession: '近期工具错误激增——会话可能卡住了（建议重新聚焦任务或重新开始）',
+    maskingSavings: '残留的旧工具输出',
+    recMasking: '旧的工具输出每一轮都会重复计费。/clear 或交接即可移除——屏蔽旧输出可用一半成本达到 LLM 摘要的效果。',
+    cacheBenchmark: '研究基准：策略性缓存管理可在代理工作负载上节省 41–80%。',
+    ioRatio: '输入 : 输出 token',
       suggestClear: '建议使用 /clear 开始新话题。',
       suggestHealthy: '上下文状态良好。',
+    adviceHint: '如需更详细的个性化建议，请在 Claude Code 中运行 /cc-usage-advice。',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -806,6 +755,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       today: '今日',
       thisMonth: '本月',
       allTime: '所有',
+      usageTab: '使用量',
       refresh: '刷新',
       settings: '设置',
       totalTokens: '总 Token 数',
@@ -827,18 +777,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       hour: '小时',
       projects: '项目',
       projectBreakdown: '各项目使用量',
-      fullPath: '完整路径',
       peakContext: '峰值上下文',
       tokenComposition: 'Token 组成',
       lastActive: '最近活动',
       pricing: '计费标准',
-      refreshPricing: '更新 Token 单价',
-      pricingUpdated: '价格已更新',
-      pricingUpdateFailed: '价格更新失败',
       sortHint: '点击列标题可排序',
       quota: '用量额度',
       quotaWindow: '时间窗口',
-      quotaLimit: '上限',
       quota5h: '5 小时',
       quotaWeekly: '每周',
       quotaHint: '来自 Anthropic /usage 的真实数据。',
@@ -850,6 +795,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       catAssistantThinking: '助手思考',
       catToolCalls: '工具调用',
       catToolResults: '工具结果',
+    catInjected: '注入内容（技能／命令）',
       estTokens: '估算 Token',
       share: '占比',
       resets: '重置',
@@ -857,23 +803,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       cacheLowEfficiency: '缓存效率偏低的项目（< 20%）',
       cacheEfficiencyTip: '命中率偏低通常意味着文件被反复读取而未预热。建议在相同工作目录下启动会话，或将常用文件添加到 CLAUDE.md。',
       last30days: '近 30 天',
-      branches: '分支',
       branchBreakdown: '各分支使用量',
       branch: '分支',
-      getAdvice: '获取 AI 建议',
-      adviceNeedsKey: '请先在设置中填入 API 密钥以使用 AI 建议。',
-      adviceGenerating: '正在生成使用建议…',
-      adviceFailed: '获取建议失败',
-      adviceScopeOverall: '整体(所有项目)',
-      adviceScopePrompt: '选择建议要聚焦的范围',
-      adviceDemoButton: '查看示例',
-      adviceDemoNotice: '',
       costComposition: '成本构成',
       date: '日期',
       yesterday: '昨日',
       dataDirectory: '数据目录',
       noDataMessage: '找不到使用数据。请确认 Claude Code 正在运行且配置正确。',
-      errorMessage: '加载使用数据时发生错误。请检查您的配置。',
       activity: '活动',
       toolUsage: '工具使用',
       toolCalls: '工具调用',
@@ -883,7 +819,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       errors: '错误',
       errorRate: '错误率',
       avgDuration: '平均耗时',
-      skill: 'Skill',
       subagent: '子代理',
       tokensCol: 'Token',
       toolUses: '工具调用数',
@@ -891,7 +826,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       prsCreated: '创建的 PR',
       turnOutcomes: '回合结果',
       permissionModes: '权限模式',
-      codeChanges: '代码变更',
       filesEdited: '编辑文件数',
       linesAdded: '新增行数',
       linesRemoved: '删除行数',
@@ -975,14 +909,16 @@ const translations: Record<SupportedLanguage, Translations> = {
       efficiency: 'トークン効率',
       cacheWaste: 'キャッシュ浪費',
       baseline: '起動ベースライン',
-      reclaimable: '回収可能なツール出力',
       fullFileReadsLabel: 'ファイル全体の読み込み',
-      recCacheBust: 'キャッシュを維持するため、セッション途中でのモデル切り替えを避けましょう。',
-      recBaseline: 'CLAUDE.md を簡潔に（200行未満）、未使用の MCP サーバーを無効化しましょう。',
-      recReclaim: 'ツール出力が大きすぎます——範囲指定読み込みや切り詰めを推奨します。',
+    sigStuckSession: '直近でツールエラーが急増——セッションが行き詰まっている可能性(タスクの仕切り直し・新セッションを検討)',
+    maskingSavings: '滞留している古いツール出力',
+    recMasking: '古いツール出力は毎ターン再課金されます。/clear やハンドオフで除去を——古い出力のマスクは LLM 要約と同等の効果を半分のコストで実現します。',
+    cacheBenchmark: '研究の基準値: 戦略的なキャッシュ管理でエージェント作業の 41–80% を節約可能。',
+    ioRatio: '入力 : 出力トークン',
       sigMultiTopic: '1セッションに複数の話題',
       suggestClear: '/clear で新しい話題を始めると効果的です。',
       suggestHealthy: 'コンテキストは良好です。',
+    adviceHint: '詳しい個別アドバイスは Claude Code で /cc-usage-advice を実行してください。',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -990,6 +926,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       today: '今日',
       thisMonth: '今月',
       allTime: 'すべて',
+    usageTab: '使用量',
       refresh: '更新',
       settings: '設定',
       totalTokens: '総トークン数',
@@ -1011,18 +948,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       hour: '時刻',
       projects: 'プロジェクト',
       projectBreakdown: 'プロジェクト別使用量',
-      fullPath: 'フルパス',
       peakContext: '最大コンテキスト',
       tokenComposition: 'トークン構成',
       lastActive: '最終アクティブ',
       pricing: '料金',
-      refreshPricing: 'Token 単価を更新',
-      pricingUpdated: '価格を更新しました',
-      pricingUpdateFailed: '価格の更新に失敗しました',
       sortHint: '列見出しをクリックで並べ替え',
       quota: '使用枠',
       quotaWindow: '期間',
-      quotaLimit: '上限',
       quota5h: '5時間',
       quotaWeekly: '週間',
       quotaHint: 'Anthropic /usage からの実データ。',
@@ -1034,6 +966,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       catAssistantThinking: 'アシスタント思考',
       catToolCalls: 'ツール呼び出し',
       catToolResults: 'ツール結果',
+    catInjected: '注入コンテンツ(スキル/コマンド)',
       estTokens: '推定トークン',
       share: '割合',
       resets: 'リセット',
@@ -1041,23 +974,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       cacheLowEfficiency: 'キャッシュ効率が低いプロジェクト（< 20%）',
       cacheEfficiencyTip: 'ヒット率が低い場合、同じファイルをセッションごとに再読み込みしている可能性があります。同じ作業ディレクトリでセッションを継続するか、CLAUDE.md に主要ファイルを追記してみてください。',
       last30days: '過去 30 日',
-      branches: 'ブランチ',
       branchBreakdown: 'ブランチ別使用量',
       branch: 'ブランチ',
-      getAdvice: 'AI アドバイスを取得',
-      adviceNeedsKey: '設定で API キーを入力してください。',
-      adviceGenerating: '使用アドバイスを生成中…',
-      adviceFailed: 'アドバイスの取得に失敗しました',
-      adviceScopeOverall: '全体(全プロジェクト)',
-      adviceScopePrompt: 'アドバイスの対象範囲を選択',
-      adviceDemoButton: 'デモを見る',
-      adviceDemoNotice: '',
       costComposition: 'コスト構成',
       date: '日付',
       yesterday: '昨日',
       dataDirectory: 'データディレクトリ',
       noDataMessage: '使用データが見つかりません。Claude Code が実行され、正しく設定されていることを確認してください。',
-      errorMessage: '使用データの読み込み中にエラーが発生しました。設定を確認してください。',
       activity: 'アクティビティ',
       toolUsage: 'ツール使用',
       toolCalls: 'ツール呼び出し',
@@ -1067,7 +990,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       errors: 'エラー',
       errorRate: 'エラー率',
       avgDuration: '平均時間',
-      skill: 'Skill',
       subagent: 'サブエージェント',
       tokensCol: 'トークン',
       toolUses: 'ツール呼び出し数',
@@ -1075,7 +997,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       prsCreated: '作成 PR 数',
       turnOutcomes: 'ターンの結果',
       permissionModes: '権限モード',
-      codeChanges: 'コード変更',
       filesEdited: '編集ファイル数',
       linesAdded: '追加行数',
       linesRemoved: '削除行数',
@@ -1159,14 +1080,16 @@ const translations: Record<SupportedLanguage, Translations> = {
       efficiency: '토큰 효율',
       cacheWaste: '캐시 낭비',
       baseline: '시작 베이스라인',
-      reclaimable: '회수 가능한 도구 출력',
       fullFileReadsLabel: '파일 전체 읽기',
-      recCacheBust: '캐시를 유지하려면 세션 도중 모델 전환을 피하세요.',
-      recBaseline: 'CLAUDE.md를 간결하게(200줄 미만) 하고 사용하지 않는 MCP 서버를 비활성화하세요.',
-      recReclaim: '도구 출력이 너무 큽니다 — 범위 지정 읽기와 잘라내기를 권장합니다.',
+    sigStuckSession: '최근 도구 오류가 급증 — 세션이 막혀 있을 수 있습니다(작업 방향 재설정 또는 새 세션 권장)',
+    maskingSavings: '잔류 중인 오래된 도구 출력',
+    recMasking: '오래된 도구 출력은 매 턴 다시 과금됩니다. /clear 또는 핸드오프로 제거하세요 — 오래된 출력 마스킹은 LLM 요약과 같은 효과를 절반 비용으로 냅니다.',
+    cacheBenchmark: '연구 기준선: 전략적 캐시 관리로 에이전트 작업의 41–80%를 절약할 수 있습니다.',
+    ioRatio: '입력 : 출력 토큰',
       sigMultiTopic: '한 세션에 여러 주제',
       suggestClear: '/clear로 새 주제를 시작하는 것이 좋습니다.',
       suggestHealthy: '컨텍스트 상태가 양호합니다.',
+    adviceHint: '자세한 맞춤 조언은 Claude Code에서 /cc-usage-advice를 실행하세요.',
     },
     popup: {
       title: 'Claude Code 사용량',
@@ -1174,6 +1097,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       today: '오늘',
       thisMonth: '이번 달',
       allTime: '전체',
+    usageTab: '사용량',
       refresh: '새로고침',
       settings: '설정',
       totalTokens: '총 토큰 수',
@@ -1195,18 +1119,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       hour: '시각',
       projects: '프로젝트',
       projectBreakdown: '프로젝트별 사용량',
-      fullPath: '전체 경로',
       peakContext: '최대 컨텍스트',
       tokenComposition: '토큰 구성',
       lastActive: '마지막 활동',
       pricing: '요금',
-      refreshPricing: '토큰 단가 업데이트',
-      pricingUpdated: '가격이 업데이트됨',
-      pricingUpdateFailed: '가격 업데이트 실패',
       sortHint: '열 머리글을 클릭하여 정렬',
       quota: '사용 한도',
       quotaWindow: '기간',
-      quotaLimit: '한도',
       quota5h: '5시간',
       quotaWeekly: '주간',
       quotaHint: 'Anthropic /usage의 실제 데이터입니다.',
@@ -1218,6 +1137,7 @@ const translations: Record<SupportedLanguage, Translations> = {
       catAssistantThinking: '어시스턴트 사고',
       catToolCalls: '도구 호출',
       catToolResults: '도구 결과',
+    catInjected: '주입 콘텐츠(스킬/명령)',
       estTokens: '추정 토큰',
       share: '비율',
       resets: '재설정',
@@ -1225,23 +1145,13 @@ const translations: Record<SupportedLanguage, Translations> = {
       cacheLowEfficiency: '캐시 효율이 낮은 프로젝트 (< 20%)',
       cacheEfficiencyTip: '적중률이 낮으면 세션마다 동일한 파일을 반복 읽는 경우가 많습니다. 같은 작업 디렉토리에서 세션을 유지하거나 주요 파일을 CLAUDE.md에 추가해 보세요.',
       last30days: '최근 30일',
-      branches: '브랜치',
       branchBreakdown: '브랜치별 사용량',
       branch: '브랜치',
-      getAdvice: 'AI 조언 받기',
-      adviceNeedsKey: '설정에서 API 키를 입력하세요.',
-      adviceGenerating: '사용 조언 생성 중…',
-      adviceFailed: '조언을 가져오지 못했습니다',
-      adviceScopeOverall: '전체(모든 프로젝트)',
-      adviceScopePrompt: '조언 범위를 선택하세요',
-      adviceDemoButton: '데모 보기',
-      adviceDemoNotice: '',
       costComposition: '비용 구성',
       date: '날짜',
       yesterday: '어제',
       dataDirectory: '데이터 디렉토리',
       noDataMessage: '사용 데이터를 찾을 수 없습니다. Claude Code가 실행 중이고 올바르게 구성되었는지 확인하세요.',
-      errorMessage: '사용 데이터를 로드하는 중 오류가 발생했습니다. 구성을 확인하세요.',
       activity: '활동',
       toolUsage: '도구 사용',
       toolCalls: '도구 호출',
@@ -1251,7 +1161,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       errors: '오류',
       errorRate: '오류율',
       avgDuration: '평균 시간',
-      skill: 'Skill',
       subagent: '서브에이전트',
       tokensCol: '토큰',
       toolUses: '도구 호출 수',
@@ -1259,7 +1168,6 @@ const translations: Record<SupportedLanguage, Translations> = {
       prsCreated: '생성한 PR',
       turnOutcomes: '턴 결과',
       permissionModes: '권한 모드',
-      codeChanges: '코드 변경',
       filesEdited: '편집한 파일 수',
       linesAdded: '추가된 줄',
       linesRemoved: '삭제된 줄',

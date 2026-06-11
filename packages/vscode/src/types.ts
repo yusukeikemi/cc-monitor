@@ -108,9 +108,6 @@ export interface ContentAnalysis {
   categories: ContentSlice[];
   toolResultBreakdown: ContentSlice[];
   totalEstimatedTokens: number;
-  // Recent user prompts (last 30 days), for the AI-advice feature. Each carries
-  // its working directory so advice can be scoped to a project.
-  recentPrompts: { cwd: string; text: string }[];
 }
 
 // --- Context Health (the live status-bar indicator) ---
@@ -128,7 +125,8 @@ export interface ContextRotSignal {
     | 'fullFileReads'
     | 'contextDegradation'
     | 'repeatedCalls'
-    | 'largeUserPrompt';
+    | 'largeUserPrompt'
+    | 'stuckSession';
   // Contextual numbers for the renderer (a percentage, a count, or minutes,
   // depending on `kind`).
   value?: number;
@@ -179,6 +177,28 @@ export interface ContextHealth {
   cacheWastedUSD: number;
   // Individual bust events, time-ordered, each attributed to a likely cause.
   cacheBusts: CacheBustEvent[];
+  // Estimated total cost of this session (per-turn usage × model pricing) and
+  // the share of it wasted on cache re-writes. Research baseline: strategic
+  // cache management saves 41-80% on agentic workloads (arXiv:2601.06007).
+  sessionCostUSD: number;
+  cacheWastePct: number;
+  // What-if: input-side tokens (cumulative across every later request, so the
+  // figure can far exceed the window size) that would have disappeared if tool
+  // outputs older than ~10 assistant turns had been masked, and what they cost
+  // at the cache-read rate. Simple observation masking matches LLM
+  // summarization at less than half the cost (arXiv:2508.21433), so a large
+  // value = cheap savings on the table.
+  maskingSavingsTokens: number;
+  maskingSavingsUSD: number;
+  // Input-side tokens (incl. cache) paid per output token. Agent workloads run
+  // 2:1-150:1 (arXiv:2605.09104); an extreme ratio means the session carries
+  // far more context than it produces.
+  inputOutputRatio: number;
+  // Waste accounting (arXiv:2605.09104 splits agent spend into production /
+  // communication / waste): tokens spent on failed work — cache re-writes plus
+  // the outputs of tool calls that errored.
+  errorToolResultTokens: number;
+  wasteTokens: number;
   // Per-session startup baseline (system prompt + tool schemas + CLAUDE.md),
   // approximated by the first request's written/processed prefix. A large
   // baseline is paid on every session regardless of the work.
