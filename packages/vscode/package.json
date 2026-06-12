@@ -1,19 +1,19 @@
 {
-  "name": "claude-code-usage",
-  "displayName": "Claude Code Usage",
-  "description": "Monitor Claude Code usage and costs in VSCode status bar",
+  "name": "cc-monitor",
+  "displayName": "CC Monitor",
+  "description": "Monitor Claude Code usage and costs in VSCode status bar (thinkcyte internal fork of GrowthJack/ClaudeCodeUsage)",
   "version": "2.0.0",
-  "publisher": "GrowthJack",
-  "author": "GrowthJack",
+  "publisher": "thinkcyte",
+  "author": "thinkcyte",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jack21/ClaudeCodeUsage.git"
+    "url": "https://github.com/yuzuponikemi/cc-monitor.git"
   },
   "bugs": {
-    "url": "https://github.com/jack21/ClaudeCodeUsage/issues"
+    "url": "https://github.com/yuzuponikemi/cc-monitor/issues"
   },
-  "homepage": "https://github.com/jack21/ClaudeCodeUsage",
+  "homepage": "https://github.com/yuzuponikemi/cc-monitor",
   "keywords": [
     "claude",
     "claude-code",
