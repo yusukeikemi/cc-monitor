@@ -165,7 +165,9 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository -o cc-monitor.vsix",
+    "reinstall": "npm run package && code --install-extension cc-monitor.vsix --force"
   },
   "devDependencies": {
     "@types/glob": "^9.0.0",
