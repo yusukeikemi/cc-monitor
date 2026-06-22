@@ -19,6 +19,9 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
   (default 5) and `claudeCodeUsage.sessionCardRecencyMinutes` (default 60). The
   global summary item now shows today's total cost; the quota item is unchanged.
   Context-rot notifications are now debounced per session and name the project.
+  Each card's hover also shows that session's **opening prompt** (first
+  human-typed prompt, ≤100 chars; `isMeta` lines and `/clear`-style slash
+  commands skipped) as a quick "which session is this?" cue.
 
 ### Added
 
