@@ -20,6 +20,8 @@ import {
   SessionData,
   SessionUsage,
   UsageData,
+  WindowSessionShare,
+  WindowUsage,
 } from './types';
 
 // Constants
@@ -1762,6 +1764,70 @@ export class ClaudeDataLoader {
       .filter((s) => s.data.messageCount > 0)
       .sort((a, b) => b.endTime.getTime() - a.endTime.getTime())
       .slice(0, limit);
+  }
+
+  /**
+   * Per-session token usage inside the current 5-hour quota window, plus each
+   * session's share of the window total. The quota endpoint only exposes the
+   * aggregate utilisation, so this token-share is the closest available proxy
+   * for "which session is consuming the quota" — it is not an exact quota %.
+   *
+   * @param records       All loaded usage records.
+   * @param windowStartMs Epoch ms of the window start (resets_at - 5h, or now - 5h).
+   * @param meta          Window metadata for context (reset time + global quota %).
+   * @param maxSessions   Cap on the number of sessions returned (default 12).
+   */
+  static getWindowUsage(
+    records: ClaudeUsageRecord[],
+    windowStartMs: number,
+    meta: { windowEnd: string | null; fiveHourUtilization: number | null },
+    maxSessions: number = 12
+  ): WindowUsage {
+    const inWindow = (records || []).filter((r) => {
+      const ms = new Date(r.timestamp).getTime();
+      return !isNaN(ms) && ms >= windowStartMs;
+    });
+
+    const bySession = new Map<string, ClaudeUsageRecord[]>();
+    for (const r of inWindow) {
+      const sid = r._sessionId || 'unknown';
+      const arr = bySession.get(sid);
+      if (arr) {
+        arr.push(r);
+      } else {
+        bySession.set(sid, [r]);
+      }
+    }
+
+    const tokensOf = (d: UsageData): number =>
+      d.totalInputTokens + d.totalOutputTokens + d.totalCacheCreationTokens + d.totalCacheReadTokens;
+
+    const raw = [...bySession.entries()].map(([sessionId, recs]) => {
+      const data = this.calculateUsageData(recs);
+      // Latest record drives the model + project label (the cwd can drift, so
+      // prefer the earliest project name like the session cards do).
+      const sorted = recs
+        .slice()
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      const model = sorted[sorted.length - 1]?.message?.model || '';
+      const projectName = sorted[0]?._projectName || 'unknown';
+      return { sessionId, projectName, model, tokens: tokensOf(data), cost: data.totalCost };
+    });
+
+    const totalTokens = raw.reduce((s, x) => s + x.tokens, 0);
+    const sessions: WindowSessionShare[] = raw
+      .filter((x) => x.tokens > 0)
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, maxSessions)
+      .map((x) => ({ ...x, share: totalTokens > 0 ? x.tokens / totalTokens : 0 }));
+
+    return {
+      windowStart: new Date(windowStartMs).toISOString(),
+      windowEnd: meta.windowEnd,
+      fiveHourUtilization: meta.fiveHourUtilization,
+      totalTokens,
+      sessions,
+    };
   }
 
   /** Normalise a path for case-insensitive comparison and grouping. */

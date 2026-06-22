@@ -59,6 +59,14 @@ export interface Translations {
     suggestClear: string;
     suggestHealthy: string;
     adviceHint: string;
+    selectSession: string;
+    activeLatest: string;
+    pinned: string;
+    shareTitle: string;
+    shareNote: string;
+    shareEmpty: string;
+    shareWindow: string;
+    globalQuota: string;
   };
   popup: {
     title: string;
@@ -234,6 +242,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       suggestClear: 'Consider /clear to start a fresh topic.',
       suggestHealthy: 'Context looks healthy.',
     adviceHint: 'For detailed, personalised advice run /cc-usage-advice in Claude Code.',
+      selectSession: 'Session',
+      activeLatest: 'Active (latest)',
+      pinned: 'Pinned',
+      shareTitle: 'Session usage this window',
+      shareNote: 'Token share within the current 5-hour window — an approximation of quota pressure, not an exact per-session quota %. Click a row to inspect that session.',
+      shareEmpty: 'No session activity in the current 5-hour window yet.',
+      shareWindow: 'Window',
+      globalQuota: '5h quota (all sessions)',
     },
     popup: {
       title: 'Claude Code Usage',
@@ -405,6 +421,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       suggestClear: "Mit /clear ein neues Thema beginnen.",
       suggestHealthy: "Kontext sieht gesund aus.",
     adviceHint: "Für detaillierte, persönliche Empfehlungen /cc-usage-advice in Claude Code ausführen.",
+      selectSession: 'Sitzung',
+      activeLatest: 'Aktiv (neueste)',
+      pinned: 'Angeheftet',
+      shareTitle: 'Sitzungsnutzung in diesem Fenster',
+      shareNote: 'Token-Anteil im aktuellen 5-Stunden-Fenster — eine Näherung der Quota-Last, kein exakter Quota-Prozentsatz pro Sitzung. Zeile anklicken, um die Sitzung zu prüfen.',
+      shareEmpty: 'Noch keine Sitzungsaktivität im aktuellen 5-Stunden-Fenster.',
+      shareWindow: 'Fenster',
+      globalQuota: '5-Std-Quota (alle Sitzungen)',
     },
     popup: {
       title: "Claude Code Nutzung",
@@ -577,6 +601,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       suggestClear: '建議使用 /clear 開始新話題。',
       suggestHealthy: '上下文狀態良好。',
     adviceHint: '想取得更詳細的個人化建議，請在 Claude Code 執行 /cc-usage-advice。',
+      selectSession: '工作階段',
+      activeLatest: '使用中（最新）',
+      pinned: '已釘選',
+      shareTitle: '本時段各工作階段用量',
+      shareNote: '目前 5 小時時段內的 token 佔比——僅為配額壓力的近似值，非精確的各工作階段配額百分比。點擊列可檢視該工作階段。',
+      shareEmpty: '目前 5 小時時段內尚無工作階段活動。',
+      shareWindow: '時段',
+      globalQuota: '5 小時配額（所有工作階段）',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -748,6 +780,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       suggestClear: '建议使用 /clear 开始新话题。',
       suggestHealthy: '上下文状态良好。',
     adviceHint: '如需更详细的个性化建议，请在 Claude Code 中运行 /cc-usage-advice。',
+      selectSession: '会话',
+      activeLatest: '活动中（最新）',
+      pinned: '已固定',
+      shareTitle: '本时段各会话用量',
+      shareNote: '当前 5 小时时段内的 token 占比——仅为配额压力的近似值，并非精确的各会话配额百分比。点击行可查看该会话。',
+      shareEmpty: '当前 5 小时时段内尚无会话活动。',
+      shareWindow: '时段',
+      globalQuota: '5 小时配额（所有会话）',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -919,6 +959,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       suggestClear: '/clear で新しい話題を始めると効果的です。',
       suggestHealthy: 'コンテキストは良好です。',
     adviceHint: '詳しい個別アドバイスは Claude Code で /cc-usage-advice を実行してください。',
+      selectSession: 'セッション',
+      activeLatest: 'アクティブ（最新）',
+      pinned: 'ピン留め',
+      shareTitle: 'この枠内のセッション別使用量',
+      shareNote: '現在の5時間枠内のトークンシェア。クォータ負荷の目安であり、セッション別の正確なクォータ%ではありません。行をクリックするとそのセッションを表示します。',
+      shareEmpty: '現在の5時間枠内にはまだセッション活動がありません。',
+      shareWindow: '対象枠',
+      globalQuota: '5時間クォータ（全セッション）',
     },
     popup: {
       title: 'Claude Code 使用量',
@@ -1090,6 +1138,14 @@ const translations: Record<SupportedLanguage, Translations> = {
       suggestClear: '/clear로 새 주제를 시작하는 것이 좋습니다.',
       suggestHealthy: '컨텍스트 상태가 양호합니다.',
     adviceHint: '자세한 맞춤 조언은 Claude Code에서 /cc-usage-advice를 실행하세요.',
+      selectSession: '세션',
+      activeLatest: '활성 (최신)',
+      pinned: '고정됨',
+      shareTitle: '이 구간의 세션별 사용량',
+      shareNote: '현재 5시간 구간 내 토큰 점유율 — 할당량 부담의 근사치이며 세션별 정확한 할당량 %가 아닙니다. 행을 클릭하면 해당 세션을 봅니다.',
+      shareEmpty: '현재 5시간 구간에 아직 세션 활동이 없습니다.',
+      shareWindow: '구간',
+      globalQuota: '5시간 할당량 (전체 세션)',
     },
     popup: {
       title: 'Claude Code 사용량',

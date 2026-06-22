@@ -159,7 +159,9 @@ export class StatusBarManager {
       let item = this.sessionItems.get(card.sessionId);
       if (!item) {
         item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, this.nextCardPriority--);
-        item.command = 'claudeCodeUsage.showDetails';
+        // Clicking a card opens the panel pinned to *this* session's Context
+        // Health, rather than the generic "most recent" view.
+        item.command = { command: 'claudeCodeUsage.showDetails', title: '', arguments: [card.sessionId] };
         this.sessionItems.set(card.sessionId, item);
       }
       this.cardData.set(card.sessionId, card);

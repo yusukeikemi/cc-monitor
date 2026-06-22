@@ -67,8 +67,8 @@ export class ClaudeCodeUsageExtension {
       vscode.commands.registerCommand('claudeCodeUsage.refresh', () => {
         this.refreshData();
       }),
-      vscode.commands.registerCommand('claudeCodeUsage.showDetails', () => {
-        this.webviewProvider.show();
+      vscode.commands.registerCommand('claudeCodeUsage.showDetails', (sessionId?: string) => {
+        this.webviewProvider.show(typeof sessionId === 'string' ? sessionId : undefined);
       }),
       vscode.commands.registerCommand('claudeCodeUsage.openSettings', () => {
         vscode.commands.executeCommand('workbench.action.openSettings', 'claudeCodeUsage');
@@ -336,11 +336,23 @@ export class ClaudeCodeUsageExtension {
       });
       const contextHealth = sessionCards.find((c) => c.health)?.health ?? null;
 
+      // Per-session token share within the current 5-hour quota window. The
+      // window start is anchored to the real reset time when the quota endpoint
+      // is reachable, else a rolling 5 hours from now.
+      const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+      const fiveHourResetsAt = usageLimits?.five_hour?.resets_at ?? null;
+      const resetMs = fiveHourResetsAt ? new Date(fiveHourResetsAt).getTime() : NaN;
+      const windowStartMs = !isNaN(resetMs) ? resetMs - FIVE_HOURS_MS : Date.now() - FIVE_HOURS_MS;
+      const windowUsage = ClaudeDataLoader.getWindowUsage(records, windowStartMs, {
+        windowEnd: fiveHourResetsAt,
+        fiveHourUtilization: usageLimits?.five_hour?.utilization ?? null,
+      });
+
       // Update UI
       this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits, quotaHistory);
       this.statusBar.renderSessionCards(sessionCards);
       this.maybeNotifyContextRot(config, sessionCards);
-      this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory, contextHealth);
+      this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory, contextHealth, sessionCards, windowUsage);
 
       // Snapshot for the cc-monitor Claude Code skills (local file only).
       if (config.exportInsights) {

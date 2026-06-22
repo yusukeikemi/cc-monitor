@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { I18n } from './i18n';
 import { getModelRatesPerMillion } from './pricing';
 import { QuotaSnapshot } from './quotaHistory';
-import { ActivityAnalysis, BranchUsage, ContentAnalysis, ContextHealth, ContextRotSignal, ProjectGroup, ProjectUsage, SessionData, SessionUsage, UsageData } from './types';
+import { ActivityAnalysis, BranchUsage, ContentAnalysis, ContextHealth, ContextRotSignal, ProjectGroup, ProjectUsage, SessionCard, SessionData, SessionUsage, UsageData, WindowUsage } from './types';
 
 export class UsageWebviewProvider {
   private panel: vscode.WebviewPanel | undefined;
@@ -33,6 +33,13 @@ export class UsageWebviewProvider {
   private get contextHealth(): ContextHealth | null {
     return this.inspectedContextHealth ?? this.activeContextHealth;
   }
+  // The currently-active session cards (drives the Context Health session picker)
+  // and the per-session token share within the live 5-hour quota window.
+  private sessionCards: SessionCard[] = [];
+  private windowUsage: WindowUsage | null = null;
+  // A session to pin once data is available — set when a status-bar card is
+  // clicked before the panel has loaded records.
+  private pendingInspectSessionId: string | null = null;
   // True once the dashboard shell (document + script) is live in the panel, so
   // subsequent refreshes can swap just the inner content instead of reloading
   // the whole document (which flashed the panel blank on every refresh).
@@ -44,10 +51,20 @@ export class UsageWebviewProvider {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  show(): void {
+  show(sessionId?: string): void {
     if (this.panel) {
       this.panel.reveal();
+      // Pin the requested session (e.g. its status-bar card was clicked).
+      if (sessionId) {
+        void this.inspectSession(sessionId);
+      }
       return;
+    }
+
+    // Panel not open yet: remember the request and apply it once the first
+    // batch of data arrives (or immediately below if records already exist).
+    if (sessionId) {
+      this.pendingInspectSessionId = sessionId;
     }
 
     this.panel = vscode.window.createWebviewPanel('claudeCodeUsage', I18n.t.popup.title, vscode.ViewColumn.One, {
@@ -74,15 +91,8 @@ export class UsageWebviewProvider {
           this.currentTab = message.tab;
           break;
         case 'inspectContextHealth': {
-          const sessionId = message.sessionId;
-          if (sessionId && this.dataDirectory) {
-            const { ClaudeDataLoader } = await import('./dataLoader');
-            const health = await ClaudeDataLoader.getContextHealth(this.allRecords, this.dataDirectory, sessionId);
-            if (health) {
-              this.inspectedContextHealth = health;
-              this.currentTab = 'contextHealth';
-              this.updateWebview();
-            }
+          if (message.sessionId) {
+            await this.inspectSession(message.sessionId);
           }
           break;
         }
@@ -123,7 +133,15 @@ export class UsageWebviewProvider {
       }
     });
 
-    this.updateWebview();
+    // If records are already loaded, pin the requested session right away so the
+    // click feels instant rather than waiting for the next refresh tick.
+    if (this.pendingInspectSessionId && this.allRecords.length > 0) {
+      const sid = this.pendingInspectSessionId;
+      this.pendingInspectSessionId = null;
+      void this.inspectSession(sid);
+    } else {
+      this.updateWebview();
+    }
   }
 
   updateData(
@@ -143,7 +161,9 @@ export class UsageWebviewProvider {
     branchBreakdown: BranchUsage[] = [],
     activityAnalysis: ActivityAnalysis | null = null,
     quotaHistory: QuotaSnapshot[] = [],
-    contextHealth: ContextHealth | null = null
+    contextHealth: ContextHealth | null = null,
+    sessionCards: SessionCard[] = [],
+    windowUsage: WindowUsage | null = null
   ): void {
     this.currentSessionData = sessionData;
     this.todayData = todayData;
@@ -165,8 +185,50 @@ export class UsageWebviewProvider {
     this.activityAnalysis = activityAnalysis;
     this.quotaHistory = quotaHistory;
     this.activeContextHealth = contextHealth;
+    this.sessionCards = sessionCards;
+    this.windowUsage = windowUsage;
+
+    // A card was clicked before records were loaded — apply the pin now.
+    if (this.pendingInspectSessionId) {
+      const sid = this.pendingInspectSessionId;
+      this.pendingInspectSessionId = null;
+      void this.inspectSession(sid);
+      return; // inspectSession() re-renders once health is resolved.
+    }
+
+    // Keep a pinned session in sync with fresh data so its window-fill and
+    // signals advance instead of freezing at the moment it was pinned.
+    if (this.inspectedContextHealth) {
+      const refreshed = this.sessionCards.find(
+        (c) => c.sessionId === this.inspectedContextHealth!.sessionId
+      )?.health;
+      if (refreshed) {
+        this.inspectedContextHealth = refreshed;
+      }
+    }
 
     if (this.panel) {
+      this.updateWebview();
+    }
+  }
+
+  /** Resolve a session's Context Health and pin it in the Context Health tab.
+   * Shared by the status-bar card click, the session picker, and the Sessions
+   * drill-down. Re-renders the panel when the health is available. */
+  private async inspectSession(sessionId: string): Promise<void> {
+    if (!sessionId || !this.dataDirectory) {
+      return;
+    }
+    // Prefer the already-computed card health (cheap); fall back to a fresh load.
+    const fromCard = this.sessionCards.find((c) => c.sessionId === sessionId)?.health;
+    let health = fromCard ?? null;
+    if (!health) {
+      const { ClaudeDataLoader } = await import('./dataLoader');
+      health = await ClaudeDataLoader.getContextHealth(this.allRecords, this.dataDirectory, sessionId);
+    }
+    if (health) {
+      this.inspectedContextHealth = health;
+      this.currentTab = 'contextHealth';
       this.updateWebview();
     }
   }
@@ -1771,20 +1833,58 @@ export class UsageWebviewProvider {
       }
     };
 
-    // Drill-down banner (when a specific session is pinned from the Sessions tab).
-    let inspectBanner = '';
-    if (this.inspectedContextHealth) {
-      inspectBanner =
-        '<div class="ch-inspecting"><span>' + t.viewing + ': ' + this.escapeHtml(h.sessionId) + '</span>' +
-        '<button class="ch-back-btn" onclick="backToActiveContextHealth()">' + t.backToActive + '</button></div>';
-    }
+    const isPinned = !!this.inspectedContextHealth;
+    const shortId = (id: string): string => (id ? id.slice(0, 8) : '—');
+    const snip = (s: string, n: number): string => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);
+    // The opening prompt is how the user actually recognises a session, so it
+    // drives the option/row label. Looked up by session id from the cards.
+    const firstPromptOf = (id: string): string =>
+      this.sessionCards.find((c) => c.sessionId === id)?.firstPrompt || '';
+    const sessionLabel = (id: string, projectName: string): string => {
+      const fp = firstPromptOf(id);
+      const base = shortId(id) + ' · ' + (projectName || 'unknown');
+      return fp ? base + ' — ' + snip(fp, 60) : base;
+    };
 
-    // Header + window-fill bar.
+    // Session picker — the active-session list (same set as the status-bar
+    // cards) plus an "active (latest)" option that follows whichever session
+    // most recently wrote. Selecting a session pins it; this resolves the old
+    // ambiguity where the tab silently jumped to whatever session wrote last.
+    let pickerBlock = '';
+    const options: string[] = [];
+    options.push(
+      '<option value="__active__"' + (!isPinned ? ' selected' : '') + '>' + this.escapeHtml(t.activeLatest) + '</option>'
+    );
+    const seenIds = new Set<string>();
+    for (const c of this.sessionCards) {
+      seenIds.add(c.sessionId);
+      const sel = isPinned && c.sessionId === h.sessionId ? ' selected' : '';
+      const label = sessionLabel(c.sessionId, c.projectName);
+      options.push('<option value="' + this.escapeHtml(c.sessionId) + '"' + sel + '>' + this.escapeHtml(label) + '</option>');
+    }
+    // A pinned session that has dropped out of the active set still needs an entry.
+    if (isPinned && h.sessionId && !seenIds.has(h.sessionId)) {
+      const label = sessionLabel(h.sessionId, h.projectName);
+      options.push('<option value="' + this.escapeHtml(h.sessionId) + '" selected>' + this.escapeHtml(label) + '</option>');
+    }
+    pickerBlock =
+      '<div class="ch-picker"><label>' + this.escapeHtml(t.selectSession) + '</label>' +
+      '<select onchange="selectContextHealthSession(this.value)">' + options.join('') + '</select></div>';
+
+    // Header + window-fill bar. The session id and a source badge ("active
+    // latest" vs "pinned") make it explicit which session this tab describes.
+    const sourceBadge =
+      '<span class="ch-source ' + (isPinned ? 'ch-source-pin' : 'ch-source-active') + '">' +
+      this.escapeHtml(isPinned ? t.pinned : t.activeLatest) + '</span>';
     const header =
       '<div class="ch-head ch-' + h.status + '">' +
       '<span class="ch-badge">' + statusLabel + '</span>' +
-      '<span class="ch-sub">' + this.escapeHtml(h.projectName) + ' · ' + this.escapeHtml(h.model || '') + '</span>' +
+      '<span class="ch-sub">' + this.escapeHtml(h.projectName) + ' · ' + this.escapeHtml(h.model || '') +
+      ' <span class="ch-sid">#' + this.escapeHtml(shortId(h.sessionId)) + '</span> ' + sourceBadge + '</span>' +
       '</div>';
+
+    // Per-session token share within the live 5-hour quota window.
+    const shareBlock = this.renderWindowShare(h.sessionId);
     let paceLine = '';
     if (h.growthTokensPerMin && h.growthTokensPerMin > 0) {
       paceLine = '<div class="ch-pace">' + t.pace + ': +' + num(h.growthTokensPerMin) + '/min';
@@ -1950,7 +2050,63 @@ export class UsageWebviewProvider {
 
     // Warnings (signals) come right after the fill bar — they're the reason to
     // look at this tab; the metric cards below carry the supporting numbers.
-    return '<div class="ch">' + inspectBanner + header + windowBlock + signalsBlock + grid + efficiencyBlock + topicsBlock + switchHint + suggestBlock + adviceHint + '</div>';
+    return '<div class="ch">' + pickerBlock + header + windowBlock + shareBlock + signalsBlock + grid + efficiencyBlock + topicsBlock + switchHint + suggestBlock + adviceHint + '</div>';
+  }
+
+  /** Per-session token share within the current 5-hour quota window. Rows are
+   * clickable (pin that session) and the current session is highlighted. This
+   * approximates "which session is eating the quota" — the quota endpoint only
+   * reports the aggregate utilisation, so an exact per-session % is impossible. */
+  private renderWindowShare(currentSessionId: string): string {
+    const w = this.windowUsage;
+    const t = I18n.t.contextHealth;
+    const num = (n: number): string => I18n.formatNumber(n);
+    const fmtUsd = (n: number): string => '$' + n.toFixed(n >= 1 ? 2 : 3);
+
+    if (!w || w.sessions.length === 0) {
+      return '<div class="ch-card"><h3>' + this.escapeHtml(t.shareTitle) + '</h3>' +
+        '<p class="table-hint">' + this.escapeHtml(t.shareEmpty) + '</p></div>';
+    }
+
+    // Window range + the global quota % (for context, not per-session).
+    const start = new Date(w.windowStart);
+    const end = w.windowEnd ? new Date(w.windowEnd) : null;
+    const range = this.formatDateTime(start) + (end ? ' → ' + this.formatDateTime(end) : '');
+    let metaLine = '<div class="ch-winrow ch-muted"><span>' + this.escapeHtml(t.shareWindow) + '</span><span>' + this.escapeHtml(range) + '</span></div>';
+    if (w.fiveHourUtilization != null) {
+      metaLine += '<div class="ch-winrow"><span>' + this.escapeHtml(t.globalQuota) + '</span><span><b>' + Math.round(w.fiveHourUtilization) + '%</b></span></div>';
+    }
+
+    // The opening prompt is the user's primary "which session is this?" cue.
+    const snip = (str: string, n: number): string => (str && str.length > n ? str.slice(0, n - 1) + '…' : str);
+    const firstPromptOf = (id: string): string =>
+      this.sessionCards.find((c) => c.sessionId === id)?.firstPrompt || '';
+
+    const palette = UsageWebviewProvider.CH_PALETTE;
+    const rows = w.sessions.map((s, i) => {
+      const sharePct = Math.round(s.share * 100);
+      const isCurrent = s.sessionId === currentSessionId;
+      const color = palette[i % palette.length];
+      const fp = firstPromptOf(s.sessionId);
+      const base = s.sessionId.slice(0, 8) + ' · ' + (s.projectName || 'unknown');
+      const label = fp ? base + ' — ' + snip(fp, 70) : base;
+      const width = Math.max(2, s.share * 100).toFixed(1);
+      return (
+        '<div class="ch-share-row' + (isCurrent ? ' ch-share-current' : '') + '" ' +
+        'onclick="inspectContextHealth(\'' + this.escapeHtml(s.sessionId) + '\')" title="' + this.escapeHtml(label) + '">' +
+        '<div class="ch-share-head"><span class="ch-share-label">' + this.escapeHtml(label) + '</span>' +
+        '<span class="ch-share-val">' + sharePct + '% · ' + num(s.tokens) + ' · ' + fmtUsd(s.cost) + '</span></div>' +
+        '<div class="ch-fill"><div class="ch-fillbar" style="width:' + width + '%; background:' + color + ';"></div></div>' +
+        '</div>'
+      );
+    }).join('');
+
+    return (
+      '<div class="ch-card"><h3>' + this.escapeHtml(t.shareTitle) + '</h3>' +
+      '<div class="ch-window">' + metaLine + '</div>' +
+      '<div class="ch-shares">' + rows + '</div>' +
+      '<p class="table-hint">' + this.escapeHtml(t.shareNote) + '</p></div>'
+    );
   }
 
   /** Server-rendered SVG line chart of context-window growth over the session. */
@@ -3240,6 +3396,34 @@ export class UsageWebviewProvider {
       .ch-watch .ch-badge { background: var(--vscode-charts-yellow); }
       .ch-rot .ch-badge { background: var(--vscode-charts-red); }
       .ch-sub { color: var(--vscode-descriptionForeground); font-size: 12px; }
+      .ch-sid { font-family: var(--vscode-editor-font-family, monospace); opacity: 0.85; }
+      .ch-source {
+        font-size: 11px;
+        padding: 1px 7px;
+        border-radius: 9px;
+        margin-left: 4px;
+        vertical-align: middle;
+      }
+      .ch-source-active { background: var(--vscode-charts-green); color: var(--vscode-editor-background); }
+      .ch-source-pin { background: var(--vscode-charts-blue); color: var(--vscode-editor-background); }
+      .ch-picker { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      .ch-picker label { color: var(--vscode-descriptionForeground); }
+      .ch-picker select {
+        flex: 1;
+        max-width: 420px;
+        padding: 3px 6px;
+        background: var(--vscode-dropdown-background);
+        color: var(--vscode-dropdown-foreground);
+        border: 1px solid var(--vscode-dropdown-border);
+        border-radius: 4px;
+      }
+      .ch-shares { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+      .ch-share-row { cursor: pointer; padding: 4px; border-radius: 6px; }
+      .ch-share-row:hover { background: var(--vscode-list-hoverBackground); }
+      .ch-share-current { background: var(--vscode-list-activeSelectionBackground); }
+      .ch-share-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; gap: 8px; }
+      .ch-share-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ch-share-val { color: var(--vscode-descriptionForeground); white-space: nowrap; }
       .ch-window { display: flex; flex-direction: column; gap: 6px; }
       .ch-winrow { display: flex; justify-content: space-between; font-size: 13px; }
       .ch-winrow.ch-muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
@@ -3392,6 +3576,14 @@ function inspectContextHealth(sessionId) {
 
 function backToActiveContextHealth() {
   vscode.postMessage({ command: 'clearInspectContextHealth' });
+}
+
+function selectContextHealthSession(value) {
+  if (value === '__active__') {
+    vscode.postMessage({ command: 'clearInspectContextHealth' });
+  } else {
+    vscode.postMessage({ command: 'inspectContextHealth', sessionId: value });
+  }
 }
 
 function toggleProjectGroup(groupId) {

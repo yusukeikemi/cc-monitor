@@ -255,6 +255,31 @@ export interface SessionCard {
   health: ContextHealth | null;
 }
 
+// --- Per-session usage within the current 5-hour quota window ---
+// Anthropic's quota endpoint only reports the *aggregate* 5-hour utilisation, so
+// a true per-session quota % cannot be derived. This is the closest proxy: each
+// active session's token volume inside the window and its share of the window's
+// total tokens. Treat `share` as an approximation of quota pressure, not an exact
+// quota percentage.
+export interface WindowSessionShare {
+  sessionId: string;
+  projectName: string;
+  model: string;
+  tokens: number; // input + output + cacheCreation + cacheRead inside the window
+  cost: number; // estimated USD inside the window
+  share: number; // tokens / window total tokens (0-1)
+}
+
+// The current 5-hour window plus its per-session token breakdown.
+export interface WindowUsage {
+  windowStart: string; // ISO start of the window (resets_at - 5h, or now - 5h)
+  windowEnd: string | null; // ISO resets_at when known, else null
+  // The global 5-hour quota utilisation (0-100) for context; not per-session.
+  fiveHourUtilization: number | null;
+  totalTokens: number; // sum of all sessions' window tokens
+  sessions: WindowSessionShare[]; // sorted by tokens desc
+}
+
 // --- Activity analysis (the "Activity" tab) ---
 // All figures cover the same recent window as the content analysis (last 30
 // days) and are exact counts derived from the raw log — not token estimates.
