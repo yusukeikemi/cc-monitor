@@ -26,6 +26,9 @@ export class ClaudeCodeUsageExtension {
   // Highest 5-hour quota threshold (80/95) already toasted in the current
   // window; reset to 0 when utilisation drops (i.e. the window rolled over).
   private quotaNotifiedThreshold = 0;
+  // Whether we have already tried to seed the quota cache from persisted history
+  // this process. Done once, lazily, on the first usage fetch.
+  private seededQuotaFromHistory = false;
   private cache: {
     records: any[];
     contentAnalysis: ContentAnalysis | null;
@@ -236,8 +239,24 @@ export class ClaudeCodeUsageExtension {
     if (!config.usageLimitTracking) {
       return null;
     }
+
+    // Seed the in-memory cache from the last persisted snapshot once per process,
+    // so the quota card renders the last-known value immediately after a reload —
+    // even while the first live fetch is still in flight, failing, or cooling
+    // down after a 429. lastUpdate stays at epoch so a fresh fetch still fires
+    // below; a successful fetch then replaces this stale seed.
+    if (!this.seededQuotaFromHistory) {
+      this.seededQuotaFromHistory = true;
+      if (!this.cache.usageLimits) {
+        const seeded = await QuotaHistory.latestAsUsageResponse().catch(() => null);
+        if (seeded) {
+          this.cache.usageLimits = seeded;
+        }
+      }
+    }
+
     const age = Date.now() - this.cache.usageLimitsLastUpdate.getTime();
-    if (this.cache.usageLimits && age < 120000) {
+    if (this.cache.usageLimits && age < 60000) {
       return this.cache.usageLimits;
     }
     const fetched = await this.apiClient.fetchUsageLimits();

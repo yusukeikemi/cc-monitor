@@ -106,4 +106,30 @@ export class QuotaHistory {
     }
     return out;
   }
+
+  /** The most recent usable snapshot reconstructed as a usage-API response, for
+   * seeding the in-memory cache on startup so the quota card can render the
+   * last-known value immediately after a reload — before the first live fetch
+   * completes (or while it is failing / cooling down after a 429). Returns null
+   * when there is no snapshot carrying at least a 5-hour or weekly figure. */
+  static async latestAsUsageResponse(): Promise<ClaudeApiUsageResponse | null> {
+    const history = await this.readHistory({ sinceDays: 30 }).catch(() => [] as QuotaSnapshot[]);
+    for (let i = history.length - 1; i >= 0; i--) {
+      const s = history[i];
+      const resp: ClaudeApiUsageResponse = {};
+      if (s.fiveHour != null && s.fiveHourResetsAt) {
+        resp.five_hour = { utilization: s.fiveHour, resets_at: s.fiveHourResetsAt };
+      }
+      if (s.sevenDay != null && s.sevenDayResetsAt) {
+        resp.seven_day = { utilization: s.sevenDay, resets_at: s.sevenDayResetsAt };
+      }
+      if (s.sevenDayOpus != null && s.sevenDayOpusResetsAt) {
+        resp.seven_day_opus = { utilization: s.sevenDayOpus, resets_at: s.sevenDayOpusResetsAt };
+      }
+      if (resp.five_hour || resp.seven_day) {
+        return resp;
+      }
+    }
+    return null;
+  }
 }

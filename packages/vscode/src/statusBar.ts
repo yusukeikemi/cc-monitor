@@ -24,6 +24,9 @@ export class StatusBarManager {
   private lastToday: UsageData | null = null;
   private lastSession: SessionData | null = null;
   private lastQuotaHistory: QuotaSnapshot[] = [];
+  // Last quota payload actually rendered, so transient main-data errors can
+  // re-render the indicator instead of hiding a still-valid quota figure.
+  private lastUsageLimits: ClaudeApiUsageResponse | null = null;
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -53,13 +56,15 @@ export class StatusBarManager {
 
     if (error) {
       this.showError(error);
-      this.quotaItem.hide();
+      // The error is about transcript data, not the quota — keep the last-known
+      // quota visible (updateQuota hides only when there is genuinely nothing).
+      this.updateQuota(this.lastUsageLimits);
       return;
     }
 
     if (!todayData) {
       this.showNoData();
-      this.quotaItem.hide();
+      this.updateQuota(this.lastUsageLimits);
       return;
     }
 
@@ -118,6 +123,7 @@ export class StatusBarManager {
       this.quotaItem.hide();
       return;
     }
+    this.lastUsageLimits = usageLimits;
 
     const parts: string[] = [];
     let worstPct = 0;

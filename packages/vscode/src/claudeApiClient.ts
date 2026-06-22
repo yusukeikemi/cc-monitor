@@ -297,8 +297,8 @@ export class ClaudeApiClient {
       let response = await this.callUsageApi(credentials.claudeAiOauth.accessToken);
 
       if (response.status === 429) {
-        this.rateLimitedUntil = Date.now() + 5 * 60 * 1000;
-        this.log('429: rate-limited, cooling down 5 min');
+        this.rateLimitedUntil = Date.now() + 90 * 1000;
+        this.log('429: rate-limited, cooling down 90s');
         return null;
       }
 
