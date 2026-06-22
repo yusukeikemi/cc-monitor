@@ -6,6 +6,20 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+### Changed
+
+- **Per-session status-bar cards.** The model, prompt-cache warmth and Context
+  Health % indicators were three separate, machine-global items — when several
+  Claude Code sessions ran at once you couldn't tell which session's cache or
+  context they reflected (the readout followed whichever session wrote last).
+  They are now merged into **one minimal card per active session** (`$(pulse)
+  project model 78% $(zap)3:24`), so each card's model / context / cache always
+  belong to a single, identifiable session. Cards appear and disappear as
+  sessions start and go idle. New settings: `claudeCodeUsage.maxSessionCards`
+  (default 5) and `claudeCodeUsage.sessionCardRecencyMinutes` (default 60). The
+  global summary item now shows today's total cost; the quota item is unchanged.
+  Context-rot notifications are now debounced per session and name the project.
+
 ### Added
 
 - **Insights snapshot export** (`claudeCodeUsage.exportInsights`, default true):

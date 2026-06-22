@@ -234,6 +234,27 @@ export interface ContextHealth {
   topicSwitchGapMin?: number;
 }
 
+// One per-session status-bar card. Each currently-active Claude Code session
+// (one .jsonl with recent activity) gets its own card so the model, context
+// fill, and prompt-cache warmth shown always belong to a single, identifiable
+// session — not a global mix of every session on the machine.
+export interface SessionCard {
+  sessionId: string;
+  projectName: string;
+  // ISO timestamp of the session's most recent record — drives the per-card
+  // prompt-cache countdown (5-min TTL from this session's last request).
+  lastActivity: string;
+  // Pretty model id of the session's latest request (e.g. "claude-opus-4-8").
+  model: string;
+  // The first human-typed prompt of the session (harness-injected/meta lines
+  // skipped), trimmed to a short snippet — a quick "ah, this is that session"
+  // cue on the card's hover. Empty when none could be extracted.
+  firstPrompt: string;
+  // Full Context Health for this session, or null when context-health analysis
+  // is disabled (the card then shows model + cache only).
+  health: ContextHealth | null;
+}
+
 // --- Activity analysis (the "Activity" tab) ---
 // All figures cover the same recent window as the content analysis (last 30
 // days) and are exact counts derived from the raw log — not token estimates.
@@ -327,6 +348,12 @@ export interface ExtensionConfig {
   // Show the live Context Health indicator in the status bar. When false the
   // indicator is hidden and its (per-session) analysis is skipped during refresh.
   enableContextHealth: boolean;
+  // A session is shown as its own status-bar card while its most recent record
+  // is within this many minutes; older sessions drop off. Default 60.
+  sessionCardRecencyMinutes: number;
+  // Cap on the number of per-session cards in the status bar, so a machine with
+  // many parallel sessions does not overflow the bar. Default 5.
+  maxSessionCards: number;
   // Pop a one-time (debounced) toast when the active session first turns "rot".
   // Opt-in (default false). No effect when enableContextHealth is off.
   contextHealthRotNotification: boolean;

@@ -9,7 +9,7 @@ import { I18n } from './i18n';
 import { ClaudeApiClient } from './claudeApiClient';
 import { InsightsExporter } from './insightsExporter';
 import { QuotaHistory, QuotaSnapshot } from './quotaHistory';
-import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ContextHealth, ExtensionConfig } from './types';
+import { ActivityAnalysis, ClaudeApiUsageResponse, ContentAnalysis, ExtensionConfig, SessionCard } from './types';
 
 export class ClaudeCodeUsageExtension {
   private statusBar: StatusBarManager;
@@ -20,9 +20,9 @@ export class ClaudeCodeUsageExtension {
   private fileWatcher: fs.FSWatcher | undefined;
   private watchDebounceTimer: NodeJS.Timeout | undefined;
   private watchedDir: string | null = null;
-  // Debounce the "context rot" toast: at most one per session, re-armed after a gap.
-  private lastRotNotifiedSession: string | null = null;
-  private lastRotNotifiedAt: number = 0;
+  // Debounce the "context rot" toast: at most one per session, re-armed after a
+  // gap. Keyed by sessionId so each running session is tracked independently.
+  private lastRotNotifiedAt: Map<string, number> = new Map();
   // Highest 5-hour quota threshold (80/95) already toasted in the current
   // window; reset to 0 when utilisation drops (i.e. the window rolled over).
   private quotaNotifiedThreshold = 0;
@@ -34,7 +34,6 @@ export class ClaudeCodeUsageExtension {
     dataDirectory: string | null;
     usageLimits: ClaudeApiUsageResponse | null;
     usageLimitsLastUpdate: Date;
-    lastRecordTime: Date | null;
   } = {
     records: [],
     contentAnalysis: null,
@@ -42,8 +41,7 @@ export class ClaudeCodeUsageExtension {
     lastUpdate: new Date(0),
     dataDirectory: null,
     usageLimits: null,
-    usageLimitsLastUpdate: new Date(0),
-    lastRecordTime: null
+    usageLimitsLastUpdate: new Date(0)
   };
 
   private outputChannel: vscode.OutputChannel;
@@ -123,6 +121,8 @@ export class ClaudeCodeUsageExtension {
       recordQuotaHistory: config.get('recordQuotaHistory', true),
       enableContentAnalysis: config.get('enableContentAnalysis', true),
       enableContextHealth: config.get('enableContextHealth', true),
+      sessionCardRecencyMinutes: config.get('sessionCardRecencyMinutes', 60),
+      maxSessionCards: config.get('maxSessionCards', 5),
       contextHealthRotNotification: config.get('contextHealthRotNotification', false),
       quotaThresholdNotification: config.get('quotaThresholdNotification', true),
       projectGroupingMode: config.get('projectGroupingMode', 'git') as 'git' | 'folder' | 'flat',
@@ -219,15 +219,15 @@ export class ClaudeCodeUsageExtension {
     }, intervalMs);
   }
 
-  /** Tick the cache-warmth countdown every second (independent of the data
-   * refresh) so the m:ss readout counts down smoothly. The tick is a Date
-   * subtraction + status-bar text set — negligible work. */
+  /** Tick each session card's cache-warmth countdown every second (independent
+   * of the data refresh) so the m:ss readouts count down smoothly. The tick is
+   * a Date subtraction + status-bar text set per card — negligible work. */
   private startCacheWarmthTimer(): void {
     if (this.cacheWarmthTimer) {
       clearInterval(this.cacheWarmthTimer);
     }
     this.cacheWarmthTimer = setInterval(() => {
-      this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
+      this.statusBar.tickCardCaches();
     }, 1_000);
   }
 
@@ -282,9 +282,11 @@ export class ClaudeCodeUsageExtension {
       const usageLimits = await this.maybeFetchUsageLimits(config);
 
       if (!needFullRefresh) {
-        // Idle: logs unchanged — only refresh the independent indicators.
+        // Idle: logs unchanged — only refresh the independent indicators. The
+        // session cards keep their last payload; their cache countdowns are
+        // ticked by the 1-second timer (tickCardCaches).
         this.statusBar.updateQuota(usageLimits);
-        this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
+        this.statusBar.tickCardCaches();
         return;
       }
 
@@ -302,14 +304,6 @@ export class ClaudeCodeUsageExtension {
       this.cache.activityAnalysis = activityAnalysis;
       this.cache.lastUpdate = new Date();
       this.cache.dataDirectory = dataDirectory;
-
-      // Track the timestamp of the most recent API call for the cache-warmth indicator.
-      if (records.length > 0) {
-        const maxTs = Math.max(...records.map((r: any) => new Date(r.timestamp).getTime()));
-        if (!isNaN(maxTs)) {
-          this.cache.lastRecordTime = new Date(maxTs);
-        }
-      }
 
       if (records.length === 0) {
         const error = 'No usage records found. Make sure Claude Code is running.';
@@ -332,16 +326,20 @@ export class ClaudeCodeUsageExtension {
 
       const quotaHistory = await QuotaHistory.readHistory({ sinceDays: 30 });
 
-      // Live Context Health for the active session (offline heuristics only).
-      const contextHealth = config.enableContextHealth
-        ? await ClaudeDataLoader.getContextHealth(records, dataDirectory)
-        : null;
+      // One card per currently-active session, each with its own model, context
+      // fill, and prompt-cache warmth (offline heuristics only). The most-recent
+      // session's health stands in for the single-session consumers below.
+      const sessionCards = await ClaudeDataLoader.getActiveSessionCards(records, dataDirectory, {
+        recencyMinutes: config.sessionCardRecencyMinutes,
+        maxCards: config.maxSessionCards,
+        includeHealth: config.enableContextHealth
+      });
+      const contextHealth = sessionCards.find((c) => c.health)?.health ?? null;
 
       // Update UI
       this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits, quotaHistory);
-      this.statusBar.updateCacheWarmth(this.cache.lastRecordTime);
-      this.statusBar.updateContextHealth(contextHealth);
-      this.maybeNotifyContextRot(config, contextHealth);
+      this.statusBar.renderSessionCards(sessionCards);
+      this.maybeNotifyContextRot(config, sessionCards);
       this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory, contextHealth);
 
       // Snapshot for the cc-monitor Claude Code skills (local file only).
@@ -373,22 +371,37 @@ export class ClaudeCodeUsageExtension {
   }
 
   /**
-   * Show a one-time, debounced toast the first time the active session turns
-   * "rot". Opt-in (contextHealthRotNotification). Re-armed for the same session
-   * only after a 30-minute quiet gap so it never nags on every refresh.
+   * Show a one-time, debounced toast the first time a session turns "rot".
+   * Opt-in (contextHealthRotNotification). Re-armed for the same session only
+   * after a 30-minute quiet gap so it never nags on every refresh. Each active
+   * session is debounced independently.
    */
-  private maybeNotifyContextRot(config: ExtensionConfig, health: ContextHealth | null): void {
-    if (!config.contextHealthRotNotification || !health || health.status !== 'rot') {
+  private maybeNotifyContextRot(config: ExtensionConfig, cards: SessionCard[]): void {
+    if (!config.contextHealthRotNotification) {
       return;
     }
     const now = Date.now();
-    const sameSession = this.lastRotNotifiedSession === health.sessionId;
-    if (sameSession && now - this.lastRotNotifiedAt < 30 * 60 * 1000) {
-      return;
+    // Forget sessions that are no longer active so the map cannot grow forever.
+    const active = new Set(cards.map((c) => c.sessionId));
+    for (const sid of [...this.lastRotNotifiedAt.keys()]) {
+      if (!active.has(sid)) {
+        this.lastRotNotifiedAt.delete(sid);
+      }
     }
-    this.lastRotNotifiedSession = health.sessionId;
-    this.lastRotNotifiedAt = now;
-    vscode.window.showWarningMessage(I18n.t.contextHealth.notifyRot);
+    for (const card of cards) {
+      if (card.health?.status !== 'rot') {
+        continue;
+      }
+      const last = this.lastRotNotifiedAt.get(card.sessionId);
+      if (last !== undefined && now - last < 30 * 60 * 1000) {
+        continue;
+      }
+      this.lastRotNotifiedAt.set(card.sessionId, now);
+      const project = card.projectName && card.projectName !== 'unknown' ? card.projectName : '';
+      vscode.window.showWarningMessage(
+        project ? `${project}: ${I18n.t.contextHealth.notifyRot}` : I18n.t.contextHealth.notifyRot
+      );
+    }
   }
 
   /**

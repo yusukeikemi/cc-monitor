@@ -1,21 +1,28 @@
 import * as vscode from 'vscode';
-import { ClaudeApiUsageResponse, ClaudeUsageLimit, ContextHealth, ContextRotSignal, SessionData, UsageData } from './types';
+import { ClaudeApiUsageResponse, ClaudeUsageLimit, ContextHealth, ContextRotSignal, SessionCard, SessionData, UsageData } from './types';
 import { I18n } from './i18n';
 import { QuotaSnapshot } from './quotaHistory';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// Status-bar priority of the first session card. Cards sit to the right of the
+// global summary (100) and quota (99) items, newest-created leftmost.
+const FIRST_CARD_PRIORITY = 98;
 
 export class StatusBarManager {
   private statusBarItem: vscode.StatusBarItem;
   private quotaItem: vscode.StatusBarItem;
-  private cacheItem: vscode.StatusBarItem;
-  private contextItem: vscode.StatusBarItem;
+  // One status-bar item per active session, keyed by sessionId. Created when a
+  // session first appears and disposed when it goes idle, so the count grows
+  // and shrinks with the number of running Claude Code sessions.
+  private sessionItems: Map<string, vscode.StatusBarItem> = new Map();
+  // Last-rendered card payload per session, so the 1-second cache tick can
+  // re-render each card's countdown without a full data refresh.
+  private cardData: Map<string, SessionCard> = new Map();
+  private nextCardPriority: number = FIRST_CARD_PRIORITY;
   private isLoading: boolean = false;
-  // Last-known data so independent update paths can re-render the main item
-  // (model label comes from Context Health, costs from the usage refresh).
+  // Last-known data so independent update paths can re-render the summary item.
   private lastToday: UsageData | null = null;
   private lastSession: SessionData | null = null;
-  private lastHealth: ContextHealth | null = null;
   private lastQuotaHistory: QuotaSnapshot[] = [];
 
   constructor() {
@@ -26,14 +33,6 @@ export class StatusBarManager {
     // A second, quieter item for the real usage-limit indicator.
     this.quotaItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
     this.quotaItem.command = 'claudeCodeUsage.showDetails';
-
-    // Third item: prompt-cache warmth countdown.
-    this.cacheItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
-    this.cacheItem.command = 'claudeCodeUsage.showDetails';
-
-    // Fourth item: live Context Health for the active session.
-    this.contextItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 97);
-    this.contextItem.command = 'claudeCodeUsage.showDetails';
 
     this.updateStatusBar();
   }
@@ -79,35 +78,12 @@ export class StatusBarManager {
   }
 
   private showTodayData(todayData: UsageData, sessionData: SessionData | null): void {
-    // Primary label = the model currently in use (costs stay in the tooltip
-    // and the dashboard — a number in the status bar was noise).
-    this.statusBarItem.text = `$(pulse) ${this.currentModelLabel(todayData, sessionData)}`;
+    // The summary item is global (every session combined), so it carries the
+    // genuinely-global figure — today's total cost — while per-session details
+    // (model / context / cache) live on the individual session cards.
+    this.statusBarItem.text = `$(pulse) ${I18n.formatCurrency(todayData.totalCost)}`;
     this.statusBarItem.tooltip = this.createTooltip(todayData, sessionData);
     this.statusBarItem.backgroundColor = undefined;
-  }
-
-  /** Human label of the model in use: Context Health's live model when known,
-   * otherwise the costliest model of the session (then of today). */
-  private currentModelLabel(todayData: UsageData, sessionData: SessionData | null): string {
-    if (this.lastHealth?.model) {
-      return this.prettyModel(this.lastHealth.model);
-    }
-    const topModel = (d: UsageData | null): string => {
-      if (!d) {
-        return '';
-      }
-      let best = '';
-      let bestCost = -1;
-      for (const [m, v] of Object.entries(d.modelBreakdown)) {
-        if (v.cost > bestCost) {
-          bestCost = v.cost;
-          best = m;
-        }
-      }
-      return best;
-    };
-    const id = topModel(sessionData) || topModel(todayData);
-    return id ? this.prettyModel(id) : 'Claude';
   }
 
   /** "claude-opus-4-8" → "Opus 4.8", "claude-fable-5[1m]" → "Fable 5",
@@ -170,93 +146,145 @@ export class StatusBarManager {
   }
 
   /**
-   * Update the prompt-cache warmth indicator.
-   * Shows a countdown (e.g. "$(zap) 3:24") from the last API request.
-   * Hidden when the cache has already expired or no data is available.
-   * Public so the extension can tick it every 30 s without a full refresh.
+   * Render one status-bar card per active session, each combining that
+   * session's model, context fill, and prompt-cache warmth into a single
+   * minimal item. Items are created on first sight of a session and disposed
+   * when a session drops out of the active set, so the number of cards tracks
+   * the number of running Claude Code sessions.
    */
-  updateCacheWarmth(lastRequestTime: Date | null): void {
-    if (!lastRequestTime) {
-      this.cacheItem.hide();
-      return;
+  renderSessionCards(cards: SessionCard[]): void {
+    const seen = new Set<string>();
+    for (const card of cards) {
+      seen.add(card.sessionId);
+      let item = this.sessionItems.get(card.sessionId);
+      if (!item) {
+        item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, this.nextCardPriority--);
+        item.command = 'claudeCodeUsage.showDetails';
+        this.sessionItems.set(card.sessionId, item);
+      }
+      this.cardData.set(card.sessionId, card);
+      this.applyCard(item, card);
+      item.show();
     }
-    const remainingMs = CACHE_TTL_MS - (Date.now() - lastRequestTime.getTime());
+    // Drop cards for sessions that are no longer active.
+    for (const [sid, item] of this.sessionItems) {
+      if (!seen.has(sid)) {
+        item.dispose();
+        this.sessionItems.delete(sid);
+        this.cardData.delete(sid);
+      }
+    }
+  }
+
+  /** Re-render only each card's text + background (the cache countdown changes
+   * every second). The hover tooltip is left untouched here and refreshed on
+   * the full data render, so we don't rebuild markdown once a second. */
+  tickCardCaches(): void {
+    for (const [sid, item] of this.sessionItems) {
+      const card = this.cardData.get(sid);
+      if (card) {
+        this.applyCardText(item, card);
+      }
+    }
+  }
+
+  /** Set a card's text and background from its payload (cheap; called on every
+   * tick). */
+  private applyCardText(item: vscode.StatusBarItem, card: SessionCard): void {
+    const health = card.health;
+    const cd = this.cacheCountdown(card.lastActivity);
+    const icon = health?.status === 'rot' ? '$(warning)' : health?.status === 'watch' ? '$(dashboard)' : '$(pulse)';
+    const parts: string[] = [icon];
+    const label = this.shortLabel(card.projectName);
+    if (label) {
+      parts.push(label);
+    }
+    const model = card.model ? this.prettyModel(card.model) : '';
+    if (model) {
+      parts.push(model);
+    }
+    if (health) {
+      parts.push(`${Math.round(health.fillRatio * 100)}%`);
+    }
+    parts.push(`$(zap)${cd.text}`);
+    item.text = parts.join(' ');
+    // Warn (orange) on a rot verdict or an almost-cold cache; quiet otherwise.
+    item.backgroundColor =
+      health?.status === 'rot' || cd.warn ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+  }
+
+  /** Full render of a card: text + background + the (heavier) hover tooltip. */
+  private applyCard(item: vscode.StatusBarItem, card: SessionCard): void {
+    this.applyCardText(item, card);
+    item.tooltip = this.createCardTooltip(card, this.cacheCountdown(card.lastActivity));
+  }
+
+  /** Prompt-cache countdown for one session from its last activity. */
+  private cacheCountdown(lastActivity: string): { text: string; warn: boolean; cold: boolean; remainingMs: number } {
+    const ts = Date.parse(lastActivity);
+    if (isNaN(ts)) {
+      return { text: '—', warn: false, cold: true, remainingMs: 0 };
+    }
+    const remainingMs = CACHE_TTL_MS - (Date.now() - ts);
     if (remainingMs <= 0) {
-      // Cold is information too: the next request re-writes the whole prefix.
-      this.cacheItem.text = `$(zap) —`;
-      const md = new vscode.MarkdownString();
-      md.supportThemeIcons = true;
-      md.appendMarkdown(`**$(zap) Prompt Cache**\n\n`);
-      md.appendMarkdown(`Cache **cold** — the 5-minute TTL has expired, so the next request re-writes the cached prefix at the 1.25× write rate.\n\n`);
-      md.appendMarkdown(`Last request: ${lastRequestTime.toLocaleTimeString()}`);
-      this.cacheItem.tooltip = md;
-      this.cacheItem.backgroundColor = undefined;
-      this.cacheItem.show();
-      return;
+      return { text: '—', warn: false, cold: true, remainingMs: 0 };
     }
     const totalSec = Math.ceil(remainingMs / 1000);
     const min = Math.floor(totalSec / 60);
     const sec = totalSec % 60;
-    const countdown = `${min}:${String(sec).padStart(2, '0')}`;
-    this.cacheItem.text = `$(zap) ${countdown}`;
-    this.cacheItem.tooltip = this.createCacheTooltip(lastRequestTime, remainingMs);
-    if (remainingMs < 60_000) {
-      this.cacheItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-    } else {
-      this.cacheItem.backgroundColor = undefined;
-    }
-    this.cacheItem.show();
+    return { text: `${min}:${String(sec).padStart(2, '0')}`, warn: remainingMs < 60_000, cold: false, remainingMs };
   }
 
-  private createCacheTooltip(lastRequest: Date, remainingMs: number): vscode.MarkdownString {
+  /** Truncate a project name to a compact status-bar label. */
+  private shortLabel(name: string): string {
+    if (!name || name === 'unknown') {
+      return '';
+    }
+    const max = 14;
+    return name.length > max ? name.slice(0, max - 1) + '…' : name;
+  }
+
+  /** Hover card: a session header + prompt-cache line, then the full Context
+   * Health breakdown (reused) when the analysis is available. */
+  private createCardTooltip(card: SessionCard, cd: { text: string; cold: boolean; remainingMs: number }): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.supportThemeIcons = true;
-    const min = Math.floor(remainingMs / 60_000);
-    const sec = Math.ceil((remainingMs % 60_000) / 1000);
-    const countdown = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
-    md.appendMarkdown(`**$(zap) Prompt Cache**\n\n`);
-    md.appendMarkdown(`Cache warm — expires in **${countdown}**\n\n`);
-    md.appendMarkdown(`Last request: ${lastRequest.toLocaleTimeString()}\n\n`);
-    md.appendMarkdown(`*Each API call resets the 5-minute TTL.*`);
+
+    const model = card.model ? this.prettyModel(card.model) : 'Claude';
+    const project = card.projectName && card.projectName !== 'unknown' ? card.projectName : '—';
+    md.appendMarkdown(`**$(pulse) ${project} · ${model}**\n\n`);
+    md.appendMarkdown(`Session \`${card.sessionId.slice(0, 8)}\`\n\n`);
+
+    // Opening prompt — the quickest "which session is this?" cue.
+    if (card.firstPrompt) {
+      md.appendMarkdown(`$(comment) *${this.escapeMarkdown(card.firstPrompt)}*\n\n`);
+    }
+
+    // Prompt-cache warmth for this session specifically.
+    const last = new Date(card.lastActivity);
+    const lastStr = isNaN(last.getTime()) ? '—' : last.toLocaleTimeString();
+    if (cd.cold) {
+      md.appendMarkdown(`$(zap) Cache **cold** — the 5-minute TTL has expired; the next request re-writes the cached prefix at the 1.25× write rate.\n\n`);
+    } else {
+      const min = Math.floor(cd.remainingMs / 60_000);
+      const sec = Math.ceil((cd.remainingMs % 60_000) / 1000);
+      const human = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+      md.appendMarkdown(`$(zap) Cache warm — expires in **${human}**\n\n`);
+    }
+    md.appendMarkdown(`Last request: ${lastStr}\n\n`);
+
+    // Full Context Health breakdown, when computed for this session.
+    if (card.health) {
+      md.appendMarkdown(`---\n\n`);
+      md.appendMarkdown(this.createContextTooltip(card.health).value);
+    }
     return md;
   }
 
-  /**
-   * Update the live Context Health indicator for the active session.
-   * Shows the window fill ratio (e.g. "$(book) 78%") and, on a "rot" verdict, a
-   * warning icon + background. Hidden when no active session is available.
-   */
-  updateContextHealth(health: ContextHealth | null): void {
-    this.lastHealth = health;
-    // The main item's model label comes from here — re-render it now that the
-    // live session model is known (the usage refresh may have run first).
-    if (this.lastToday) {
-      this.showTodayData(this.lastToday, this.lastSession);
-    }
-    if (!health) {
-      this.contextItem.hide();
-      return;
-    }
-    const pct = Math.round(health.fillRatio * 100);
-    const icon = health.status === 'rot' ? '$(warning)' : health.status === 'watch' ? '$(dashboard)' : '$(book)';
-    let text = `${icon} ${this.gauge(health.fillRatio)} ${pct}%`;
-    // On a "rot" verdict driven by a dominating tool result, name the culprit.
-    const big = health.signals.find((s) => s.kind === 'largeToolResult');
-    if (health.status === 'rot' && big && big.label) {
-      text += ` · ${big.label}`;
-    }
-    this.contextItem.text = text;
-    this.contextItem.backgroundColor =
-      health.status === 'rot' ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
-    this.contextItem.tooltip = this.createContextTooltip(health);
-    this.contextItem.show();
-  }
-
-  /** Five-cell segment gauge, e.g. "▰▰▰▰▱". */
-  private gauge(ratio: number): string {
-    const cells = 5;
-    const filled = Math.max(0, Math.min(cells, Math.round(ratio * cells)));
-    return '▰'.repeat(filled) + '▱'.repeat(cells - filled);
+  /** Escape Markdown control characters so a prompt snippet renders verbatim
+   * (and can't break the surrounding italic emphasis). */
+  private escapeMarkdown(text: string): string {
+    return text.replace(/[\\`*_{}[\]()#+\-!|<>]/g, '\\$&');
   }
 
   /** Unicode sparkline scaled to the series' own peak (shows the growth shape). */
@@ -397,14 +425,23 @@ export class StatusBarManager {
     this.statusBarItem.text = `$(circle-slash) ${I18n.t.statusBar.noData}`;
     this.statusBarItem.tooltip = I18n.t.statusBar.notRunning;
     this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-    this.contextItem.hide();
+    this.hideAllCards();
   }
 
   private showError(error: string): void {
     this.statusBarItem.text = `$(error) ${I18n.t.statusBar.error}`;
     this.statusBarItem.tooltip = error;
     this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
-    this.contextItem.hide();
+    this.hideAllCards();
+  }
+
+  /** Tear down all session cards (used on error / no-data states). */
+  private hideAllCards(): void {
+    for (const item of this.sessionItems.values()) {
+      item.dispose();
+    }
+    this.sessionItems.clear();
+    this.cardData.clear();
   }
 
   /**
@@ -575,7 +612,10 @@ export class StatusBarManager {
   dispose(): void {
     this.statusBarItem.dispose();
     this.quotaItem.dispose();
-    this.cacheItem.dispose();
-    this.contextItem.dispose();
+    for (const item of this.sessionItems.values()) {
+      item.dispose();
+    }
+    this.sessionItems.clear();
+    this.cardData.clear();
   }
 }

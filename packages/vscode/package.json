@@ -105,7 +105,19 @@
         "claudeCodeUsage.contextHealthRotNotification": {
           "type": "boolean",
           "default": false,
-          "description": "Pop a one-time notification when the active session first shows 'context rot'. Debounced to at most once per session (re-armed after a 30-minute quiet gap). Requires enableContextHealth."
+          "description": "Pop a one-time notification when a session first shows 'context rot'. Debounced to at most once per session (re-armed after a 30-minute quiet gap). Requires enableContextHealth."
+        },
+        "claudeCodeUsage.sessionCardRecencyMinutes": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "description": "Show a separate status-bar card for each Claude Code session whose most recent request is within this many minutes. Older sessions drop off the bar. Each card shows that session's own model, context fill, and prompt-cache warmth."
+        },
+        "claudeCodeUsage.maxSessionCards": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Maximum number of per-session cards shown in the status bar at once (most recently active first), so a machine running many parallel sessions does not overflow the bar."
         },
         "claudeCodeUsage.quotaThresholdNotification": {
           "type": "boolean",

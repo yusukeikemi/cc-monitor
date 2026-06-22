@@ -16,6 +16,7 @@ import {
   ContextRotSignal,
   ProjectGroup,
   ProjectUsage,
+  SessionCard,
   SessionData,
   SessionUsage,
   UsageData,
@@ -1360,6 +1361,162 @@ export class ClaudeDataLoader {
       topicSwitchAt,
       topicSwitchGapMin,
     };
+  }
+
+  /**
+   * Build one card per currently-active session, so the status bar can show a
+   * separate model / context / cache readout for each running Claude Code
+   * instead of a single global mix. "Active" = a session whose most recent
+   * record is within `recencyMinutes`. Cards are sorted most-recent-first and
+   * capped at `maxCards`.
+   *
+   * Context Health is computed per session (one .jsonl read each) only when
+   * `includeHealth` is set; otherwise the card carries model + last-activity
+   * alone, which is enough for the model label and cache-warmth countdown.
+   */
+  static async getActiveSessionCards(
+    records: ClaudeUsageRecord[],
+    dataDirectory: string,
+    opts: { recencyMinutes: number; maxCards: number; includeHealth: boolean }
+  ): Promise<SessionCard[]> {
+    if (!records || records.length === 0) {
+      return [];
+    }
+
+    // Group by session, tracking each session's latest record (for model +
+    // last-activity) and earliest project name (stable label; the cwd can
+    // drift into subfolders mid-session).
+    interface Agg {
+      latest: ClaudeUsageRecord;
+      latestMs: number;
+      firstMs: number;
+      projectName: string;
+    }
+    const bySession = new Map<string, Agg>();
+    for (const r of records) {
+      const sid = r._sessionId;
+      if (!sid) {
+        continue;
+      }
+      const ms = new Date(r.timestamp).getTime();
+      if (isNaN(ms)) {
+        continue;
+      }
+      const cur = bySession.get(sid);
+      if (!cur) {
+        bySession.set(sid, { latest: r, latestMs: ms, firstMs: ms, projectName: r._projectName || 'unknown' });
+        continue;
+      }
+      if (ms > cur.latestMs) {
+        cur.latestMs = ms;
+        cur.latest = r;
+      }
+      if (ms < cur.firstMs) {
+        cur.firstMs = ms;
+        cur.projectName = r._projectName || cur.projectName;
+      }
+    }
+
+    const cutoff = Date.now() - opts.recencyMinutes * 60 * 1000;
+    const active = [...bySession.entries()]
+      .filter(([, a]) => a.latestMs >= cutoff)
+      .sort((a, b) => b[1].latestMs - a[1].latestMs)
+      .slice(0, Math.max(0, opts.maxCards));
+
+    const cards: SessionCard[] = [];
+    for (const [sessionId, a] of active) {
+      const health = opts.includeHealth
+        ? await this.getContextHealth(records, dataDirectory, sessionId)
+        : null;
+      // The session file lives under the encoded log dir; _projectPath is the
+      // real cwd and would not resolve under projects/ (mirrors getContextHealth).
+      const logDir = a.latest._logDir || a.latest._projectPath;
+      const firstPrompt = logDir
+        ? await this.getSessionFirstPrompt(path.join(dataDirectory, CLAUDE_PROJECTS_DIR_NAME, logDir, `${sessionId}.jsonl`), sessionId)
+        : '';
+      cards.push({
+        sessionId,
+        projectName: health?.projectName || a.projectName,
+        lastActivity: new Date(a.latestMs).toISOString(),
+        model: health?.model || a.latest.message?.model || '',
+        firstPrompt,
+        health,
+      });
+    }
+    return cards;
+  }
+
+  // A session's opening prompt never changes, so cache it by sessionId to avoid
+  // re-reading the .jsonl on every refresh. Empty results are not cached so a
+  // session that has not yet written a prompt is retried.
+  private static firstPromptCache: Map<string, string> = new Map();
+
+  /**
+   * Extract the first human-typed prompt of a session: the first `role: user`
+   * line that is not harness-injected (`isMeta`) and carries real text (not a
+   * tool result). Light-cleaned (tags/whitespace stripped) and capped to ~100
+   * characters for a status-bar hover snippet. Returns '' when none is found.
+   */
+  private static async getSessionFirstPrompt(filePath: string, sessionId: string): Promise<string> {
+    const cached = this.firstPromptCache.get(sessionId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    let content: string;
+    try {
+      content = await readFile(filePath, 'utf-8');
+    } catch {
+      return '';
+    }
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed === '') {
+        continue;
+      }
+      let parsed: any;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      const msg = parsed?.message;
+      if (!msg || msg.role !== 'user' || parsed.isMeta === true) {
+        continue;
+      }
+      let text = '';
+      if (typeof msg.content === 'string') {
+        text = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          // tool_result blocks are not the user's prompt; only collect text.
+          if (block && block.type === 'text' && typeof block.text === 'string') {
+            text += (text ? ' ' : '') + block.text;
+          }
+        }
+      }
+      // Slash-command expansions (e.g. the `/clear` that starts a fresh session)
+      // arrive as a non-meta user line wrapped in <command-name> tags — that is
+      // not the prompt the user is thinking of, so skip and keep scanning.
+      if (text.includes('<command-name>')) {
+        continue;
+      }
+      const snippet = this.cleanPromptSnippet(text);
+      if (snippet.length >= 4) {
+        this.firstPromptCache.set(sessionId, snippet);
+        return snippet;
+      }
+    }
+    return '';
+  }
+
+  /** Strip harness wrapper tags + collapse whitespace, then cap at 100 chars. */
+  private static cleanPromptSnippet(text: string): string {
+    const cleaned = text
+      .replace(/<[^>]+>/g, ' ') // drop <command-name>, <system-reminder>, … tags
+      .replace(/\s+/g, ' ')
+      .trim();
+    const MAX = 100;
+    return cleaned.length > MAX ? cleaned.slice(0, MAX - 1) + '…' : cleaned;
   }
 
   private static async getEarliestTimestamp(filePath: string): Promise<Date | null> {
