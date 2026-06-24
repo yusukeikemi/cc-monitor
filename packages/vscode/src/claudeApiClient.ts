@@ -162,7 +162,10 @@ export class ClaudeApiClient {
   }
 
   private async getValidCredentials(): Promise<ClaudeCredentials | null> {
-    let credentials = this.credentials || (await this.loadCredentials());
+    // Always re-read from disk so we pick up tokens refreshed by Claude Code itself.
+    // Caching this.credentials causes 400 errors when Claude Code has already rotated
+    // the refresh token and written new credentials to .credentials.json.
+    let credentials = await this.loadCredentials();
     if (!credentials) {
       return null;
     }

@@ -6,6 +6,17 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-06-24
+
+### Fixed
+
+- **OAuth token refresh 400 error**: `getValidCredentials()` was caching credentials
+  in memory after the first load. When Claude Code CLI rotated the refresh token and
+  wrote new credentials to `.credentials.json`, cc-monitor kept using the stale
+  in-memory token, causing every subsequent refresh attempt to fail with HTTP 400.
+  Fixed by always re-reading from disk so we pick up tokens already refreshed by
+  Claude Code itself.
+
 ### Changed
 
 - **Per-session status-bar cards.** The model, prompt-cache warmth and Context

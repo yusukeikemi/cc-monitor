@@ -2,7 +2,7 @@
   "name": "cc-monitor",
   "displayName": "CC Monitor",
   "description": "Monitor Claude Code usage and costs in VSCode status bar (thinkcyte internal fork of GrowthJack/ClaudeCodeUsage)",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "thinkcyte",
   "author": "thinkcyte",
   "license": "MIT",
