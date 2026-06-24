@@ -6,6 +6,19 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-06-24
+
+### Fixed
+
+- **Subagent transcripts no longer appear as session cards.** Claude Code stores
+  each subagent (Task tool) run as a separate `subagents/agent-<hash>.jsonl`
+  transcript, which `parseSessionInfo` was treating as its own session — so
+  subagent runs leaked into the status-bar session cards and the Context Health
+  session picker. `getActiveSessionCards` now skips these (records whose log dir
+  is `subagents` or whose session id starts with `agent-`), leaving only real
+  user-facing conversations. Token totals and the Activity tab's "Subagent
+  Usage" table are computed via a separate path and are unaffected.
+
 ## [2.0.1] - 2026-06-24
 
 ### Fixed

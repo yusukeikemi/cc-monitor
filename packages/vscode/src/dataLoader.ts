@@ -1400,6 +1400,13 @@ export class ClaudeDataLoader {
       if (!sid) {
         continue;
       }
+      // Subagent (Task tool) transcripts live in a `subagents/` subfolder as
+      // `agent-<hash>.jsonl`, so parseSessionInfo turns each into its own
+      // "session". They are not user-facing sessions — exclude them from the
+      // cards (and the Context Health picker) so only real conversations show.
+      if (r._logDir === 'subagents' || sid.startsWith('agent-')) {
+        continue;
+      }
       const ms = new Date(r.timestamp).getTime();
       if (isNaN(ms)) {
         continue;
