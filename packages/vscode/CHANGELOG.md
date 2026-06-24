@@ -6,6 +6,27 @@ upstream release: 1.0.8). Format follows [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-24
+
+### Changed
+
+- **Usage-endpoint 429 now uses exponential backoff (120s base).** The OAuth
+  `/usage` metadata endpoint enforces its own per-endpoint rate limit, and a 429
+  there often outlasts a short fixed cooldown — so the previous flat 90s wait
+  re-tripped the limit on the very first retry, looping. Each consecutive 429 now
+  doubles the wait from a 120s base (120 → 240 → 480 → 960 → capped at 1800s); a
+  successful fetch resets the streak. The cooldown log line now reports the streak
+  count. This is unrelated to your token quota — a 429 here never consumes usage.
+
+### Added
+
+- **Stale quota indicator + last-updated tooltip.** When the quota figure is older
+  than 150s (e.g. while rate-limited), the status-bar icon switches from
+  `$(dashboard)` to `$(history)` so the displayed value is visibly flagged as old.
+  The hover tooltip now always shows when the figure was last fetched
+  (`Updated: HH:MM:SS (Xm ago)`), and leads with a ⚠ "rate-limited — showing last
+  known value" line when stale. (en/ja only.)
+
 ## [2.0.2] - 2026-06-24
 
 ### Fixed

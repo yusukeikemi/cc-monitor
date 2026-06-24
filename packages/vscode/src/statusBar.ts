@@ -27,6 +27,12 @@ export class StatusBarManager {
   // Last quota payload actually rendered, so transient main-data errors can
   // re-render the indicator instead of hiding a still-valid quota figure.
   private lastUsageLimits: ClaudeApiUsageResponse | null = null;
+  // When the quota figure was last successfully fetched, so the hover tooltip
+  // can show its age and flag a stale value (e.g. while rate-limited).
+  private lastUsageLimitsUpdate: Date | null = null;
+  // Beyond this age the quota figure is treated as stale (rate-limited backoff
+  // keeps the value > the normal ~60s refresh, so 2.5 min reliably means "old").
+  private static readonly QUOTA_STALE_MS = 150 * 1000;
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -50,7 +56,8 @@ export class StatusBarManager {
     sessionData?: SessionData | null,
     error?: string,
     usageLimits?: ClaudeApiUsageResponse | null,
-    quotaHistory?: QuotaSnapshot[]
+    quotaHistory?: QuotaSnapshot[],
+    lastUpdate?: Date
   ): void {
     this.isLoading = false;
 
@@ -71,7 +78,7 @@ export class StatusBarManager {
     this.lastToday = todayData;
     this.lastSession = sessionData ?? null;
     this.showTodayData(todayData, sessionData ?? null);
-    this.updateQuota(usageLimits ?? null, quotaHistory);
+    this.updateQuota(usageLimits ?? null, quotaHistory, lastUpdate);
   }
 
   private updateStatusBar(): void {
@@ -113,9 +120,15 @@ export class StatusBarManager {
    * OAuth usage API. Hidden when the data is unavailable (e.g. not signed in).
    * Public so it can be refreshed on its own while the rest of the UI is idle.
    */
-  updateQuota(usageLimits: ClaudeApiUsageResponse | null, quotaHistory?: QuotaSnapshot[]): void {
+  updateQuota(usageLimits: ClaudeApiUsageResponse | null, quotaHistory?: QuotaSnapshot[], lastUpdate?: Date): void {
     if (quotaHistory && quotaHistory.length > 0) {
       this.lastQuotaHistory = quotaHistory;
+    }
+    // Remember when the figure was last fetched so the tooltip can show its age.
+    // Fallback paths (transient errors) call without a timestamp and keep the
+    // previously stored one.
+    if (lastUpdate) {
+      this.lastUsageLimitsUpdate = lastUpdate;
     }
     const fiveHour = usageLimits?.five_hour;
     const weekly = usageLimits?.seven_day;
@@ -124,6 +137,12 @@ export class StatusBarManager {
       return;
     }
     this.lastUsageLimits = usageLimits;
+
+    // A real fetch time is > epoch; the history seed leaves it at epoch, in
+    // which case the age is unknown and we don't flag staleness.
+    const hasRealUpdate = !!this.lastUsageLimitsUpdate && this.lastUsageLimitsUpdate.getTime() > 0;
+    const ageMs = hasRealUpdate ? Date.now() - this.lastUsageLimitsUpdate!.getTime() : 0;
+    const stale = hasRealUpdate && ageMs > StatusBarManager.QUOTA_STALE_MS;
 
     const parts: string[] = [];
     let worstPct = 0;
@@ -136,7 +155,10 @@ export class StatusBarManager {
       parts.push(`wk:${Math.round(weekly.utilization)}%`);
     }
 
-    this.quotaItem.text = `$(dashboard) ${parts.join(' ')}`;
+    // A stale figure swaps the dashboard icon for a clock-with-arrow so the
+    // value still shows but is visibly flagged as old (e.g. while rate-limited).
+    const icon = stale ? '$(history)' : '$(dashboard)';
+    this.quotaItem.text = `${icon} ${parts.join(' ')}`;
 
     // Stay quiet until usage actually gets high.
     if (worstPct >= 95) {
@@ -147,7 +169,7 @@ export class StatusBarManager {
       this.quotaItem.backgroundColor = undefined;
     }
 
-    this.quotaItem.tooltip = this.createQuotaTooltip(usageLimits as ClaudeApiUsageResponse);
+    this.quotaItem.tooltip = this.createQuotaTooltip(usageLimits as ClaudeApiUsageResponse, stale);
     this.quotaItem.show();
   }
 
@@ -502,7 +524,7 @@ export class StatusBarManager {
     return md;
   }
 
-  private createQuotaTooltip(usageLimits: ClaudeApiUsageResponse): vscode.MarkdownString {
+  private createQuotaTooltip(usageLimits: ClaudeApiUsageResponse, stale = false): vscode.MarkdownString {
     const t = I18n.t.popup;
     const md = new vscode.MarkdownString();
     md.supportThemeIcons = true;
@@ -545,7 +567,50 @@ export class StatusBarManager {
     }
 
     md.appendMarkdown(`\n*${t.quotaHint}*`);
+
+    // Last-updated footer. Always shows when the figure was fetched; when the
+    // value is stale (e.g. rate-limited) it leads with a warning so the user
+    // knows the number on the bar is old.
+    if (this.lastUsageLimitsUpdate && this.lastUsageLimitsUpdate.getTime() > 0) {
+      const time = this.formatClock(this.lastUsageLimitsUpdate);
+      const ago = this.formatAgo(Date.now() - this.lastUsageLimitsUpdate.getTime());
+      const updated = t.quotaUpdated ?? 'Updated';
+      if (stale) {
+        const staleMsg = t.quotaStale ?? 'Rate-limited — showing last known value';
+        md.appendMarkdown(`\n\n$(warning) **${staleMsg}**\n\n*${updated}: ${time} (${ago})*`);
+      } else {
+        md.appendMarkdown(`\n\n*${updated}: ${time} (${ago})*`);
+      }
+    }
     return md;
+  }
+
+  /** Local wall-clock time, e.g. "08:47:06". */
+  private formatClock(d: Date): string {
+    try {
+      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return d.toISOString().slice(11, 19);
+    }
+  }
+
+  /** Elapsed time as a compact "ago" string, e.g. "just now", "45s ago",
+   * "3m ago", "1h 5m ago". */
+  private formatAgo(ms: number): string {
+    if (ms < 5_000) {
+      return 'just now';
+    }
+    const totalSec = Math.floor(ms / 1000);
+    if (totalSec < 60) {
+      return `${totalSec}s ago`;
+    }
+    const totalMin = Math.floor(totalSec / 60);
+    if (totalMin < 60) {
+      return `${totalMin}m ago`;
+    }
+    const hours = Math.floor(totalMin / 60);
+    const minutes = totalMin % 60;
+    return `${hours}h ${minutes}m ago`;
   }
 
   /** Unicode sparkline of one quota series from the recorded history, on an

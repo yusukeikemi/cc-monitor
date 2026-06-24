@@ -36,6 +36,13 @@ export class ClaudeApiClient {
   // the item Claude Code itself manages.
   private credentialsSource: 'file' | 'keychain' | null = null;
   private rateLimitedUntil: number = 0;
+  // Exponential backoff for the usage endpoint's per-endpoint rate limit (429).
+  // Anthropic's metadata API trips a 429 that often outlasts a short fixed
+  // cooldown, so each consecutive 429 doubles the wait from a 120s base up to a
+  // cap. A successful fetch resets the streak.
+  private consecutive429: number = 0;
+  private static readonly BACKOFF_BASE_MS = 120 * 1000;
+  private static readonly BACKOFF_MAX_MS = 30 * 60 * 1000;
   private out: vscode.OutputChannel | null;
   // Once curl has succeeded after fetch failed, remember so we don't keep
   // paying the cost of a doomed fetch attempt on every refresh.
@@ -300,8 +307,13 @@ export class ClaudeApiClient {
       let response = await this.callUsageApi(credentials.claudeAiOauth.accessToken);
 
       if (response.status === 429) {
-        this.rateLimitedUntil = Date.now() + 90 * 1000;
-        this.log('429: rate-limited, cooling down 90s');
+        this.consecutive429 += 1;
+        const backoffMs = Math.min(
+          ClaudeApiClient.BACKOFF_BASE_MS * 2 ** (this.consecutive429 - 1),
+          ClaudeApiClient.BACKOFF_MAX_MS
+        );
+        this.rateLimitedUntil = Date.now() + backoffMs;
+        this.log(`429: rate-limited (streak ${this.consecutive429}), cooling down ${Math.round(backoffMs / 1000)}s`);
         return null;
       }
 
@@ -322,6 +334,8 @@ export class ClaudeApiClient {
         return null;
       }
       const data = JSON.parse(response.body) as ClaudeApiUsageResponse;
+      // A clean fetch clears the 429 streak so the next limit starts at base again.
+      this.consecutive429 = 0;
       this.log(`usage: ok — 5h=${data.five_hour?.utilization ?? 'n/a'}%, wk=${data.seven_day?.utilization ?? 'n/a'}%`);
       return data;
     } catch (e) {
