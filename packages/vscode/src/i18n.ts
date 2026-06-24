@@ -106,6 +106,9 @@ export interface Translations {
     quota5h: string;
     quotaWeekly: string;
     quotaHint: string;
+    // Optional: only en/ja are maintained; other locales fall back to English.
+    quotaUpdated?: string;
+    quotaStale?: string;
     contentAnalysis: string;
     estimatedNote: string;
     byTool: string;
@@ -289,6 +292,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       quota5h: '5-hour',
       quotaWeekly: 'Weekly',
       quotaHint: 'Real data from Anthropic /usage.',
+      quotaUpdated: 'Updated',
+      quotaStale: 'Rate-limited — showing last known value',
       contentAnalysis: 'Content',
       estimatedNote: 'Estimated from text length — relative shares are reliable, absolute figures are approximate.',
       byTool: 'Tool Results by Tool',
@@ -1006,6 +1011,8 @@ const translations: Record<SupportedLanguage, Translations> = {
       quota5h: '5時間',
       quotaWeekly: '週間',
       quotaHint: 'Anthropic /usage からの実データ。',
+      quotaUpdated: '最終更新',
+      quotaStale: 'レート制限中 — 最後に取得した値を表示しています',
       contentAnalysis: 'コンテンツ',
       estimatedNote: 'テキスト長からの推定値 — 相対割合は信頼でき、絶対値は概算です。',
       byTool: 'ツール別の結果使用量',

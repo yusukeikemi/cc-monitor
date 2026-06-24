@@ -304,7 +304,7 @@ export class ClaudeCodeUsageExtension {
         // Idle: logs unchanged — only refresh the independent indicators. The
         // session cards keep their last payload; their cache countdowns are
         // ticked by the 1-second timer (tickCardCaches).
-        this.statusBar.updateQuota(usageLimits);
+        this.statusBar.updateQuota(usageLimits, undefined, this.cache.usageLimitsLastUpdate);
         this.statusBar.tickCardCaches();
         return;
       }
@@ -368,7 +368,7 @@ export class ClaudeCodeUsageExtension {
       });
 
       // Update UI
-      this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits, quotaHistory);
+      this.statusBar.updateUsageData(todayData, sessionData, undefined, usageLimits, quotaHistory, this.cache.usageLimitsLastUpdate);
       this.statusBar.renderSessionCards(sessionCards);
       this.maybeNotifyContextRot(config, sessionCards);
       this.webviewProvider.updateData(sessionData, todayData, monthData, allTimeData, dailyDataForMonth, dailyDataForAllTime, hourlyDataForToday, undefined, dataDirectory, records, sessionBreakdown, projectBreakdown, contentAnalysis, branchBreakdown, activityAnalysis, quotaHistory, contextHealth, sessionCards, windowUsage);
